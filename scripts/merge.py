@@ -43,6 +43,16 @@ def load_json(path, what, default=None):
         raise MergeError("%s is not valid JSON: %s (%s)" % (what, path, e))
 
 
+def embed_spec(record, run_dir):
+    """Copy the text of a record's spec file into it as `spec_text`, so the page can offer it for copying."""
+    spec_file = record.get("spec_file") if isinstance(record, dict) else None
+    if spec_file:
+        path = Path(run_dir) / spec_file
+        if path.is_file():
+            record = {**record, "spec_text": path.read_text(encoding="utf-8")}
+    return record
+
+
 def build_record(job, filter_record, boost_record, run_date):
     record = dict(job)
     record["filter"] = ({k: filter_record.get(k) for k in ("stage", "reasons", "years_required", "years_model")}
@@ -94,8 +104,8 @@ def merge_run(root, run_date):
         if path.exists():
             record = load_json(path, "boost record")
             if record.get("ok"):
-                boosts[str(job["id"])] = record
-    rollup_record = load_json(run_dir / "boost_rollup.json", "boost_rollup.json", default={})
+                boosts[str(job["id"])] = embed_spec(record, run_dir)
+    rollup_record = embed_spec(load_json(run_dir / "boost_rollup.json", "boost_rollup.json", default={}), run_dir)
 
     index = {str(j["id"]): j for j in jobs}
     counts = {"date": run_date, "jobs_in_run": len(enriched), "added": 0, "filled": 0, "unchanged": 0}

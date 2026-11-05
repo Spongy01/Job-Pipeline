@@ -142,6 +142,20 @@ class MergeTests(MergeTestCase):
         self.assertEqual(summary["rollup"], "none")
         self.assertFalse((self.tmp / "rollups.json").exists())
 
+    def test_spec_text_is_embedded_when_the_file_exists(self):
+        specs = self.run_dir / "boost" / "specs"
+        specs.mkdir()
+        (specs / "1-np.md").write_text("# Spec\nbody\n")
+        (specs / "rollup-x.md").write_text("# Rollup spec\n")
+        self.write_run([enriched_job("1"), enriched_job("2")],
+                       boosts={"1": {"ok": True, "spec_file": "boost/specs/1-np.md"},
+                               "2": {"ok": True, "spec_file": "boost/specs/missing.md"}},
+                       rollup={"ok": True, "spec_file": "boost/specs/rollup-x.md"})
+        self.go()
+        self.assertEqual(self.by_id("1")["boost"]["spec_text"], "# Spec\nbody\n")
+        self.assertNotIn("spec_text", self.by_id("2")["boost"])
+        self.assertEqual(json.loads((self.tmp / "rollups.json").read_text())[DATE]["spec_text"], "# Rollup spec\n")
+
     def test_no_rollup_file(self):
         self.write_run([enriched_job("1")])
         self.assertEqual(self.go()["rollup"], "none")
