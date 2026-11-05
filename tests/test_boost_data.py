@@ -194,5 +194,27 @@ class ProjectsAndChecksTests(unittest.TestCase):
         self.assertNotIn("\u2014", str(out))
 
 
+class FormatTests(unittest.TestCase):
+    def test_format_gaps(self):
+        j = job("1", enrichment={
+            M9: result(required=[skill("Kubernetes", "no", True)], preferred=[skill("Terraform", "similar", False)]),
+            MG: result(required=[skill("Kubernetes", "no", False)])})
+        text = bd.format_gaps(bd.consolidate_gaps(j))
+        self.assertIn("- Kubernetes | required | missing | flagged by 2 of 2 models | learnable in a day: 1 of 2", text)
+        self.assertIn("- Terraform | preferred | only a similar skill is on the resume | flagged by 1 of 2 models "
+                      "(flagged by one model, check it against the resume)", text)
+
+    def test_format_gaps_empty(self):
+        self.assertIn("none", bd.format_gaps([]).lower())
+
+    def test_format_tally_limits_rows(self):
+        rows = [{"skill": "S%d" % i, "jobs": 30 - i, "job_ids": [], "models_flagged_max": 2, "learnable_share": 0.5,
+                 "required_count": 1, "preferred_count": 0} for i in range(30)]
+        text = bd.format_tally(rows, limit=5)
+        self.assertEqual(len(text.splitlines()), 5)
+        self.assertIn("- S0: 30 jobs (1 required, 0 preferred)", text)
+        self.assertIn("50%", text)
+
+
 if __name__ == "__main__":
     unittest.main()

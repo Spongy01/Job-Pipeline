@@ -168,3 +168,26 @@ def strip_em_dashes(value):
     if isinstance(value, dict):
         return {k: strip_em_dashes(v) for k, v in value.items()}
     return value
+
+
+# ---------- text for prompts ----------
+
+def format_gaps(gaps):
+    if not gaps:
+        return "(none: the models found no clear gaps)"
+    lines = []
+    for g in gaps:
+        status = "missing" if g["status"] == "no" else "only a similar skill is on the resume"
+        line = "- %s | %s | %s | flagged by %d of %d models | learnable in a day: %d of %d" % (
+            g["skill"], g["kind"], status, len(g["flagged_by"]), g["models_total"],
+            g["learnable_votes"], len(g["flagged_by"]))
+        if g["single_model"]:
+            line = line.replace(" | learnable", " (flagged by one model, check it against the resume) | learnable")
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def format_tally(rows, limit=25):
+    return "\n".join("- %s: %d jobs (%d required, %d preferred), flagged by up to %d models, learnable in a day for %d%% of mentions"
+                     % (r["skill"], r["jobs"], r["required_count"], r["preferred_count"],
+                        r["models_flagged_max"], round(r["learnable_share"] * 100)) for r in rows[:limit])
