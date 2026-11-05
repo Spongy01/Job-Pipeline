@@ -8,6 +8,7 @@ from pathlib import Path
 
 SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
 sys.path.insert(0, str(SCRIPTS))
+import jobslock  # noqa: E402
 import merge  # noqa: E402
 
 DATE = "2026-11-04"
@@ -53,6 +54,21 @@ class MergeTestCase(unittest.TestCase):
 
 
 class MergeTests(MergeTestCase):
+    def test_merge_waits_for_lock(self):
+        import threading
+        import time
+        self.write_run([enriched_job("1")])
+        done = []
+        with jobslock.jobs_lock(self.tmp):
+            t = threading.Thread(target=lambda: (self.go(), done.append(time.monotonic())))
+            t.start()
+            time.sleep(0.3)
+            self.assertEqual(done, [])
+            released = time.monotonic()
+        t.join(5)
+        self.assertEqual(len(done), 1)
+        self.assertGreaterEqual(done[0], released)
+
     def test_new_run_adds_all_jobs_with_sections(self):
         self.write_run([enriched_job("1"), enriched_job("2")],
                        boosts={"1": {"ok": True, "plan": {"verdict": "v"}}})
@@ -209,6 +225,7 @@ class InputErrorTests(MergeTestCase):
         (self.tmp / "scripts").mkdir()
         shutil.copy(SCRIPTS / "merge.py", self.tmp / "scripts" / "merge.py")
         shutil.copy(SCRIPTS / "clean.py", self.tmp / "scripts" / "clean.py")
+        shutil.copy(SCRIPTS / "jobslock.py", self.tmp / "scripts" / "jobslock.py")
         self.write_run([enriched_job("1")])
         r = subprocess.run([sys.executable, str(self.tmp / "scripts" / "merge.py"), DATE], capture_output=True, text=True, cwd="/")
         self.assertEqual(r.returncode, 0, r.stderr)

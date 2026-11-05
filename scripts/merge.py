@@ -22,6 +22,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from clean import write_json_atomic  # noqa: E402
+from jobslock import jobs_lock  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 NEVER_TOUCH = ("user_status", "run_date")
@@ -84,6 +85,11 @@ def fill_missing(existing, new):
 
 
 def merge_run(root, run_date):
+    with jobs_lock(root):
+        return _merge_run(root, run_date)
+
+
+def _merge_run(root, run_date):
     root = Path(root)
     run_dir = root / "runs" / run_date
     enriched = load_json(run_dir / "enriched.json", "enriched.json")

@@ -29,6 +29,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import jobs_query as jq  # noqa: E402
+from jobslock import jobs_lock  # noqa: E402
 from clean import write_json_atomic  # noqa: E402
 from jobs_query import JobsError  # noqa: E402
 
@@ -74,7 +75,7 @@ class JobsStore:
     def set_status(self, job_id, status):
         if status not in STATUS_VALUES:
             raise ValueError("status must be one of applied, skipped, null")
-        with self._lock:
+        with self._lock, jobs_lock(self.root):
             jobs = jq.load_jobs(self.path)  # fresh read: never write over a stale copy
             job = next((j for j in jobs if str(j["id"]) == str(job_id)), None)
             if job is None:

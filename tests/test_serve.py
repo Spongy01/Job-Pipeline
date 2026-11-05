@@ -10,6 +10,7 @@ from pathlib import Path
 
 SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
 sys.path.insert(0, str(SCRIPTS))
+import jobslock  # noqa: E402
 import serve  # noqa: E402
 
 M9, MG = "qwen3.5:9b", "gemma4:e4b"
@@ -143,6 +144,18 @@ class ReadTests(ServeTestCase):
 
 
 class StatusTests(ServeTestCase):
+    def test_set_status_waits_for_lock(self):
+        import time
+        results = []
+        with jobslock.jobs_lock(self.tmp):
+            t = threading.Thread(target=lambda: results.append(self.post_status("2", {"status": "applied"})))
+            t.start()
+            time.sleep(0.3)
+            self.assertEqual(results, [])
+            self.assertIsNone(json.loads((self.tmp / "jobs.json").read_text())[1]["user_status"])
+        t.join(5)
+        self.assertEqual(results[0][0], 200)
+
     def file_jobs(self):
         return json.loads((self.tmp / "jobs.json").read_text())
 
@@ -225,7 +238,7 @@ class StartupTests(unittest.TestCase):
         tmp = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, tmp, True)
         (tmp / "scripts").mkdir()
-        for name in ("serve.py", "jobs_query.py", "clean.py"):
+        for name in ("serve.py", "jobs_query.py", "clean.py", "jobslock.py"):
             shutil.copy(SCRIPTS / name, tmp / "scripts" / name)
         (tmp / "web").mkdir()
         taken = socket.socket()
@@ -244,7 +257,7 @@ class StartupTests(unittest.TestCase):
         tmp = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, tmp, True)
         (tmp / "scripts").mkdir()
-        for name in ("serve.py", "jobs_query.py", "clean.py"):
+        for name in ("serve.py", "jobs_query.py", "clean.py", "jobslock.py"):
             shutil.copy(SCRIPTS / name, tmp / "scripts" / name)
         (tmp / "web").mkdir()
         (tmp / "jobs.json").write_text("[{corrupt")
