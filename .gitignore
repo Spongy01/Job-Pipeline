@@ -6,3 +6,4 @@ runs/
 __pycache__/
 .venv/
 .superpowers/
+rollups.json
