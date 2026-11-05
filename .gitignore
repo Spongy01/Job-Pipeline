@@ -3,3 +3,4 @@ resume/
 jobs.json
 jobs.json.bak
 runs/
+__pycache__/
