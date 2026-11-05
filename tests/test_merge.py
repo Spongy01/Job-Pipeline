@@ -8,6 +8,7 @@ from pathlib import Path
 
 SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
 sys.path.insert(0, str(SCRIPTS))
+import jobslock  # noqa: E402
 import merge  # noqa: E402
 
 DATE = "2026-11-04"
@@ -52,7 +53,80 @@ class MergeTestCase(unittest.TestCase):
         return merge.merge_run(self.tmp, date)
 
 
+class MergeOneTests(MergeTestCase):
+    def one(self, job, rec="auto"):
+        rec = filtered_rec(job["id"]) if rec == "auto" else rec
+        return merge.merge_one(self.tmp, DATE, job, rec)
+
+    def test_merge_one_replaces_a_failed_model_entry_with_an_ok_one(self):
+        failed = enriched_job("1")
+        failed["enrichment"][MG] = {"ok": False, "error": "boom"}
+        self.one(failed)
+        self.assertFalse(self.by_id("1")["enrichment"][MG]["ok"])
+        self.assertEqual(self.one(enriched_job("1")), "filled")
+        self.assertTrue(self.by_id("1")["enrichment"][MG]["ok"])
+
+    def test_merge_one_never_replaces_an_ok_entry(self):
+        self.one(enriched_job("1"))
+        other = enriched_job("1")
+        other["enrichment"][M9] = {"ok": True, "data": {"score": 1}}
+        self.assertEqual(self.one(other), "unchanged")
+        self.assertEqual(self.by_id("1")["enrichment"][M9]["data"]["score"], 80)
+
+    def test_merge_one_adds_then_unchanged(self):
+        self.assertEqual(self.one(enriched_job("1")), "added")
+        self.assertEqual(self.one(enriched_job("1")), "unchanged")
+        record = self.by_id("1")
+        self.assertEqual((record["stage"], record["run_date"], record["user_status"]), ("passed", DATE, None))
+        self.assertEqual(len(self.jobs()), 1)
+
+    def test_merge_one_fills_missing_model_only(self):
+        self.one(enriched_job("1", models=(M9,)))
+        self.assertEqual(self.one(enriched_job("1", models=(M9, MG))), "filled")
+        self.assertEqual(sorted(self.by_id("1")["enrichment"]), sorted([M9, MG]))
+
+    def test_merge_one_keeps_user_status_and_run_date(self):
+        self.one(enriched_job("1"))
+        jobs = self.jobs()
+        jobs[0]["user_status"] = "applied"
+        (self.tmp / "jobs.json").write_text(json.dumps(jobs))
+        merge.merge_one(self.tmp, "2030-01-01", enriched_job("1", models=(M9, MG)), filtered_rec("1", stage="rejected"))
+        self.assertEqual((self.by_id("1")["user_status"], self.by_id("1")["run_date"]), ("applied", DATE))
+
+    def test_merge_one_corrupt_jobs_json_raises_and_writes_nothing(self):
+        (self.tmp / "jobs.json").write_text("[{corrupt")
+        with self.assertRaises(merge.MergeError):
+            self.one(enriched_job("1"))
+        self.assertEqual((self.tmp / "jobs.json").read_text(), "[{corrupt")
+        self.assertFalse((self.tmp / "jobs.json.bak").exists())
+
+    def test_merge_one_writes_bak_before_change(self):
+        self.one(enriched_job("1"))
+        before = (self.tmp / "jobs.json").read_text()
+        self.one(enriched_job("2"))
+        self.assertEqual((self.tmp / "jobs.json.bak").read_text(), before)
+
+    def test_merge_one_without_filter_record_is_enriched_stage(self):
+        self.one(enriched_job("1"), rec=None)
+        self.assertEqual(self.by_id("1")["stage"], "enriched")
+
+
 class MergeTests(MergeTestCase):
+    def test_merge_waits_for_lock(self):
+        import threading
+        import time
+        self.write_run([enriched_job("1")])
+        done = []
+        with jobslock.jobs_lock(self.tmp):
+            t = threading.Thread(target=lambda: (self.go(), done.append(time.monotonic())))
+            t.start()
+            time.sleep(0.3)
+            self.assertEqual(done, [])
+            released = time.monotonic()
+        t.join(5)
+        self.assertEqual(len(done), 1)
+        self.assertGreaterEqual(done[0], released)
+
     def test_new_run_adds_all_jobs_with_sections(self):
         self.write_run([enriched_job("1"), enriched_job("2")],
                        boosts={"1": {"ok": True, "plan": {"verdict": "v"}}})
@@ -209,6 +283,7 @@ class InputErrorTests(MergeTestCase):
         (self.tmp / "scripts").mkdir()
         shutil.copy(SCRIPTS / "merge.py", self.tmp / "scripts" / "merge.py")
         shutil.copy(SCRIPTS / "clean.py", self.tmp / "scripts" / "clean.py")
+        shutil.copy(SCRIPTS / "jobslock.py", self.tmp / "scripts" / "jobslock.py")
         self.write_run([enriched_job("1")])
         r = subprocess.run([sys.executable, str(self.tmp / "scripts" / "merge.py"), DATE], capture_output=True, text=True, cwd="/")
         self.assertEqual(r.returncode, 0, r.stderr)

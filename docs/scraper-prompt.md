@@ -14,6 +14,7 @@ Always pass the JSON through the quoted heredoc as shown, because descriptions a
 
 The command prints one line of JSON:
 - {"status": "queued", ...}: done, move on to the next job.
+- {"status": "requeued", ...}: the job had failed earlier and is queued again. Move on.
 - {"status": "duplicate", ...}: the job was already handled, skip it and move on. This is normal.
 - A non-zero exit or an error message: read the message, fix the JSON (for example a missing id, posting_name, company or linkedin_url), and try that job once more. If it still fails, note the job id and continue with the next one.
 - An error saying the run is stopping: you called stop earlier, so do not send more jobs.

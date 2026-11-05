@@ -7,3 +7,6 @@ __pycache__/
 .venv/
 .superpowers/
 rollups.json
+queue/
+.jobs.lock
+.worker.lock

@@ -14,6 +14,10 @@
   var selected = null; // a job id, "rollup", or null
   var loadToken = 0;
   var searchTimer = null;
+  var POLL_MS = 5000;
+  var polling = false;
+  var freshIds = {};      // job ids that arrived while the page was open and were not opened yet
+  var rollupMissing = false;
 
   // ---------- small helpers ----------
   function loadPrefs() {
@@ -136,10 +140,13 @@
   }
 
   // ---------- list, charts ----------
-  function refresh() {
+  function viewParams() {
     var params = new URLSearchParams({ range: state.range, sort: state.sort, show: state.show, status: state.status, model: state.model, q: state.q });
     if (state.range === "from") params.set("from", state.from || localToday());
-    return api("/api/view?" + params).then(function (data) {
+    return params;
+  }
+  function refresh() {
+    return api("/api/view?" + viewParams()).then(function (data) {
       view = data;
       fillModels();
       renderCharts();
@@ -245,23 +252,28 @@
       h("div", { class: "c", text: [c.company, c.location, c.work_model].filter(Boolean).join(" · ") }), row);
   }
   function markActive() {
-    Array.prototype.forEach.call($("nav").querySelectorAll(".card"), function (n) { n.classList.toggle("active", n.getAttribute("data-id") === selected); });
+    Array.prototype.forEach.call($("nav").querySelectorAll(".card"), function (n) {
+      var id = n.getAttribute("data-id");
+      n.classList.toggle("active", id === selected);
+      n.classList.toggle("fresh", !!freshIds[id]);
+    });
   }
-  function select(id) { selected = id; markActive(); loadMain(); }
+  function select(id) { selected = id; delete freshIds[id]; markActive(); loadMain(); }
 
   // ---------- main page ----------
-  function loadMain() {
-    var main = $("main"), token = ++loadToken;
+  function loadMain(keepScroll) {
+    var main = $("main"), token = ++loadToken, top = main.scrollTop;
+    rollupMissing = false;
     if (selected === null) { clear(main); main.appendChild(h("div", { class: "empty", text: view && view.empty ? "Nothing to show for this time frame." : "Select a job." })); return Promise.resolve(); }
     var request = selected === "rollup"
       ? api("/api/rollup/" + (view.range.to || view.latest_run_date || view.range.from)).then(renderRollup, function (err) {
-          if (err.status === 404) return renderNote("No rollup for this day yet. Run the boost step, then merge.");
+          if (err.status === 404) { rollupMissing = true; return renderNote("No rollup for this day yet. It appears when the run is stopped and boost has finished."); }
           throw err;
         })
       : api("/api/job/" + encodeURIComponent(selected)).then(renderJob);
     return request.then(function (node) {
       if (token !== loadToken) return;
-      clear(main); main.appendChild(node); main.scrollTop = 0;
+      clear(main); main.appendChild(node); main.scrollTop = keepScroll === true ? top : 0;
     }).catch(function (err) {
       if (token !== loadToken) return;
       clear(main); main.appendChild(h("div", { class: "empty", text: "Could not load: " + err.message }));
@@ -475,6 +487,38 @@
     }
     return wrap;
   }
+
+  // ---------- live updates ----------
+  // Every few seconds, while the tab is visible, fetch the list again. A failed poll changes nothing on
+  // screen. The selected job, the scroll positions and the open description are left alone unless that
+  // job's own card changed (its scores, stage, boost or status).
+  function cardSignature(id) {
+    var card = view && view.cards.filter(function (c) { return c.id === id; })[0];
+    return card ? JSON.stringify(card) : null;
+  }
+  function poll() {
+    if (document.visibilityState !== "visible" || polling || !view) return;
+    polling = true;
+    var before = view, beforeSignature = cardSignature(selected), known = {};
+    before.cards.forEach(function (c) { known[c.id] = true; });
+    api("/api/view?" + viewParams()).then(function (data) {
+      var nav = $("nav"), navTop = nav.scrollTop;
+      data.cards.forEach(function (c) { if (!known[c.id] && !before.empty) freshIds[c.id] = true; });
+      view = data;
+      fillModels();
+      renderCharts();
+      renderShowCounts();
+      renderNav();
+      nav.scrollTop = navTop;
+      var ids = view.cards.map(function (c) { return c.id; });
+      if (selected !== "rollup" && ids.indexOf(selected) === -1) { selected = ids.length ? ids[0] : null; markActive(); return loadMain(); }
+      markActive();
+      if (selected === "rollup" ? rollupMissing : cardSignature(selected) !== beforeSignature) return loadMain(true);
+    }).catch(function () { /* keep what is on screen; try again on the next tick */ })
+      .then(function () { polling = false; });
+  }
+  setInterval(poll, POLL_MS);
+  document.addEventListener("visibilitychange", poll);
 
   wireControls();
   syncControls();

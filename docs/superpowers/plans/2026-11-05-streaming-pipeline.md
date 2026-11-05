@@ -37,18 +37,18 @@ Failure modes the spec implies that no single task's happy path covers (each has
 ### Task 1: Cross-process lock for `jobs.json`
 
 **Files:**
-- Create: `scripts/filelock.py`, `tests/test_filelock.py`
+- Create: `scripts/jobslock.py`, `tests/test_jobslock.py`
 - Modify: `scripts/merge.py` (`merge_run`), `scripts/serve.py` (`JobsStore.set_status`), `tests/test_merge.py`, `tests/test_serve.py`
 
 **Interfaces:**
-- Produces: `filelock.jobs_lock(root) -> contextmanager` (blocking `fcntl.flock` exclusive lock on `<root>/.jobs.lock`, file created if missing, released on exit even on exception). Not reentrant: never nest.
+- Produces: `jobslock.jobs_lock(root) -> contextmanager` (blocking `fcntl.flock` exclusive lock on `<root>/.jobs.lock`, file created if missing, released on exit even on exception). Not reentrant: never nest.
 
-- [ ] **Step 1: Write failing tests** in `tests/test_filelock.py`: `test_lock_excludes_second_process` (a subprocess holds the lock for 0.5 s; the parent's `jobs_lock` call returns only after it ends; measure with `time.monotonic`), `test_lock_released_after_exception`, `test_lock_file_created_in_root`.
-- [ ] **Step 2: Run** `python3 -m unittest tests.test_filelock -v`. Expected: FAIL (module missing).
-- [ ] **Step 3: Implement** `scripts/filelock.py` as specified above.
+- [ ] **Step 1: Write failing tests** in `tests/test_jobslock.py`: `test_lock_excludes_second_process` (a subprocess holds the lock for 0.5 s; the parent's `jobs_lock` call returns only after it ends; measure with `time.monotonic`), `test_lock_released_after_exception`, `test_lock_file_created_in_root`.
+- [ ] **Step 2: Run** `python3 -m unittest tests.test_jobslock -v`. Expected: FAIL (module missing).
+- [ ] **Step 3: Implement** `scripts/jobslock.py` as specified above.
 - [ ] **Step 4: Wire it in.** `merge.merge_run`: take the lock around "load `jobs.json` through write" (the read must happen inside the lock). `JobsStore.set_status`: take the lock around its fresh read, `.bak` copy and write, in addition to its in-process lock. Add `test_merge_waits_for_lock` in `tests/test_merge.py` (hold the lock in a thread, assert merge only completes after release) and `test_set_status_waits_for_lock` in `tests/test_serve.py`.
 - [ ] **Step 5: Run** `python3 -m unittest discover -s tests`. Expected: all pass.
-- [ ] **Step 6: Commit** `git add scripts/filelock.py scripts/merge.py scripts/serve.py tests && git commit -m "Cross-process lock for jobs.json writers"` (end with the attribution line from the session's reminder).
+- [ ] **Step 6: Commit** `git add scripts/jobslock.py scripts/merge.py scripts/serve.py tests && git commit -m "Cross-process lock for jobs.json writers"` (end with the attribution line from the session's reminder).
 
 ---
 
@@ -88,7 +88,7 @@ Failure modes the spec implies that no single task's happy path covers (each has
 - Create: `scripts/enqueue.py`, `scripts/stoppipeline.py`, `tests/test_enqueue.py`
 
 **Interfaces:**
-- Consumes: `jobqueue.*` (Task 2), `filelock.jobs_lock` (Task 1), `clean.validate(job) -> (id, reason)`, `clean.write_json_atomic`.
+- Consumes: `jobqueue.*` (Task 2), `jobslock.jobs_lock` (Task 1), `clean.validate(job) -> (id, reason)`, `clean.write_json_atomic`.
 - Produces:
   - `enqueue.EnqueueError(Exception)`
   - `enqueue.enqueue(root, job: dict, today: str | None = None) -> dict` returning `{"status": "queued" | "duplicate" | "requeued", "id": str, "date": str, "pending": int}`
@@ -112,7 +112,7 @@ Behavior of `enqueue` (everything under `jobs_lock(root)`): invalid JSON or `cle
 - Modify: `scripts/merge.py` (add `merge_one`), `scripts/filter.py` (factor out report building, add `rebuild_report`), `tests/test_merge.py`, `tests/test_filter.py`
 
 **Interfaces:**
-- Consumes: `clean.validate`, `clean.clean_job`, `enrich.enrich_one`, `enrich.load_prompt`, `jd_flags.detect`, `filter.evaluate`, `merge.build_record`, `merge.fill_missing`, `filelock.jobs_lock`.
+- Consumes: `clean.validate`, `clean.clean_job`, `enrich.enrich_one`, `enrich.load_prompt`, `jd_flags.detect`, `filter.evaluate`, `merge.build_record`, `merge.fill_missing`, `jobslock.jobs_lock`.
 - Produces:
   - `merge.merge_one(root, run_date, job: dict, filter_record: dict | None) -> str` returning `"added"`, `"filled"` or `"unchanged"`. Under `jobs_lock`: load `jobs.json` (missing is an empty list, corrupt raises `MergeError`), `build_record`, add or `fill_missing`, copy `.bak` then `write_json_atomic` only when something changed.
   - `filter.build_report(records: list, rules: dict, model: str) -> tuple[dict, dict]` returning `(counts, report)` exactly as `filter.run` writes them today; `filter.run` calls it.

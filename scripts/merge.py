@@ -22,6 +22,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from clean import write_json_atomic  # noqa: E402
+from jobslock import jobs_lock  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 NEVER_TOUCH = ("user_status", "run_date")
@@ -76,14 +77,45 @@ def fill_missing(existing, new):
                 existing["enrichment"], changed = dict(value), True
                 continue
             for model, entry in value.items():
-                if model not in have:
+                current = have.get(model)
+                # a model that failed earlier is replaced by a later ok result; an ok entry is never replaced
+                if model not in have or (isinstance(current, dict) and not current.get("ok") and entry.get("ok")):
                     have[model], changed = entry, True
         elif existing.get(key) is None:
             existing[key], changed = value, True
     return changed
 
 
+def merge_one(root, run_date, job, filter_record):
+    """Merge a single enriched job into jobs.json (same never-overwrite rules as merge_run).
+    Returns "added", "filled" or "unchanged"."""
+    root = Path(root)
+    with jobs_lock(root):
+        jobs = load_json(root / "jobs.json", "jobs.json", default=[])
+        if not isinstance(jobs, list):
+            raise MergeError("jobs.json must contain a JSON list")
+        record = build_record(job, filter_record, None, run_date)
+        existing = next((j for j in jobs if str(j["id"]) == str(job["id"])), None)
+        if existing is None:
+            jobs.append(record)
+            result = "added"
+        elif fill_missing(existing, record):
+            result = "filled"
+        else:
+            return "unchanged"
+        jobs_path = root / "jobs.json"
+        if jobs_path.exists():
+            shutil.copyfile(jobs_path, root / "jobs.json.bak")
+        write_json_atomic(jobs_path, jobs)
+        return result
+
+
 def merge_run(root, run_date):
+    with jobs_lock(root):
+        return _merge_run(root, run_date)
+
+
+def _merge_run(root, run_date):
     root = Path(root)
     run_dir = root / "runs" / run_date
     enriched = load_json(run_dir / "enriched.json", "enriched.json")

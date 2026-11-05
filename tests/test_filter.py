@@ -187,3 +187,29 @@ class CliTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RebuildReportTests(unittest.TestCase):
+    def test_rebuild_report_matches_batch_report(self):
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, True)
+        run_dir = tmp / "runs" / DATE
+        run_dir.mkdir(parents=True)
+        (tmp / "config.json").write_text(json.dumps({"rules": {**RULES, "locations": ["NYC"]}}))
+        jobs = [make_job("1"), make_job("2", years=(("overall", "required", 6, 8),)), make_job("3", closed=True)]
+        (run_dir / "enriched.json").write_text(json.dumps(jobs))
+        jobfilter.run(tmp, DATE)
+        batch = json.loads((run_dir / "filter_report.json").read_text())
+        (run_dir / "filter_report.json").unlink()
+        counts = jobfilter.rebuild_report(tmp, DATE)
+        self.assertEqual(json.loads((run_dir / "filter_report.json").read_text()), batch)
+        self.assertEqual(counts, batch["counts"])
+        self.assertEqual(batch["rules_set_but_not_applied"], {"locations": ["NYC"]})
+
+    def test_rebuild_report_without_filtered_json_raises(self):
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, True)
+        (tmp / "runs" / DATE).mkdir(parents=True)
+        (tmp / "config.json").write_text(json.dumps({"rules": RULES}))
+        with self.assertRaises(jobfilter.FilterError):
+            jobfilter.rebuild_report(tmp, DATE)

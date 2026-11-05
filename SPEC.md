@@ -235,3 +235,76 @@ requests. Data is inserted with `textContent` only and links from data must be h
 score graph per model found in the data (dashed line is the average) and the controls, a scrollable nav of job cards with
 a pinned rollup card, and the selected job on the right. Up and down (or j and k) move between jobs; the controls are
 remembered in the browser.
+
+## streaming pipeline (enqueue, worker, stop, start)
+
+Jobs are processed while the scraper is still working. The scraper hands each job to `enqueue.py`; a worker
+cleans, enriches, filters and merges it into `jobs.json` one job at a time (the overlap is scraping versus
+processing, never two jobs at once); `stoppipeline.py` tells the worker that no more jobs are coming.
+Paths in this section are relative to the project root. `queue/` and `.jobs.lock` are git ignored.
+
+### queue layout and run state (scripts/jobqueue.py)
+
+| path | what |
+|---|---|
+| `queue/pending/<id>.json` | the raw job, waiting |
+| `queue/processing/<id>.json` | the job the worker has taken. On worker start everything here goes back to pending |
+| `queue/failed/<id>.json` | `{job, error}` for a job that failed twice. Calling `enqueue.py` with the same id puts it back in pending |
+| `queue/run.json` | `{date, stopping}`. The run date is fixed when the run begins (`start.py`, or the first `enqueue.py` when there is none) and is never read from the clock afterwards, so a run that crosses midnight stays one run |
+
+Files are written under a temp name and renamed, so a reader never sees half a job. A corrupt `run.json` or job file raises
+`QueueError`.
+
+### enqueue.py
+
+    python3 scripts/enqueue.py '<job json>'      or      python3 scripts/enqueue.py -     (JSON on stdin)
+
+Validates with the clean step's rules (id of digits, posting_name, company, linkedin_url), appends the job to
+`runs/<run date>/raw.json` (skipped if that id is already there, so a retry after a crash is safe) and drops it in
+`queue/pending/`. Prints one JSON line `{status: queued | duplicate | requeued, id, date, pending}`. A duplicate is an id already in
+`jobs.json`, `pending` or `processing`. Errors print `{status: "error", error}` and exit 1 with nothing queued: bad JSON, missing
+fields, corrupt `jobs.json` or `raw.json`, or `run.json` has `stopping: true`. The text for the Cowork scraper prompt is in
+`docs/scraper-prompt.md`.
+
+### stoppipeline.py
+
+    python3 scripts/stoppipeline.py
+
+Sets `stopping: true` in `queue/run.json` (creating the run if there is none). Prints `{status: "stopping", date, pending, processing}`.
+It does not stop anything by itself and never touches the web page.
+
+### worker.py
+
+    .venv/bin/python scripts/worker.py [--poll 2] [--prompt-version v2]
+
+Preflight first (config, `models.enricher` downloaded and Ollama reachable, resume, prompt), so a problem exits non-zero before any job
+is touched. Per job (`scripts/pipeline_job.py`): clean, `enrich_one` for every model that has no ok result yet for this prompt version,
+`jd_flags`, `filter.evaluate`, then `merge.merge_one`. `runs/<date>/clean.json`, `enriched.json` and `filtered.json` are updated one
+entry at a time (the entry with the same id is replaced) and keep the schemas above. Closed jobs and jobs without a description make
+no model call. A job gets two attempts (a model that returned no usable result counts as a failed attempt, and a later ok result replaces it in `jobs.json`), then goes to `queue/failed/`; if Ollama itself is unreachable the job goes back to pending instead and the worker waits and its partial entries are removed from the run files.
+
+When `stopping` is set and the queue is empty, the end-of-run steps run: `filter_report.json` and `clean_report.json` are rebuilt,
+boost runs (`models.booster`), then `merge.merge_run` adds the boost plans and the rollup. Then `queue/run.json` is removed, the models
+are unloaded and the worker exits. If an end step fails, `run.json` stays and starting the worker again retries only those steps.
+Prints one JSON line `{date, processed, failed, end_steps: ok | failed | skipped, error?}`; exit is non-zero if a job or an end step failed.
+
+### one worker only
+
+The worker holds a non-blocking lock on `.worker.lock` for its whole life; a second worker exits with an error. `enqueue.py` replaces characters that cannot be written as UTF-8 (a lone surrogate) instead of failing.
+
+### start.py
+
+    python3 scripts/start.py [--port 8765]
+
+Starts `ollama serve` if Ollama does not answer, begins the run, starts the worker and the page (unless the port already answers).
+One JSON status line per component. Ctrl-C or SIGTERM stops only what it started. When the worker exits the page and Ollama keep running.
+
+### jobs.json lock (scripts/jobslock.py)
+
+`jobs_lock(root)` is one exclusive `flock` on `.jobs.lock`. `merge.merge_run`, `merge.merge_one`, `enqueue.py`, `stoppipeline.py` and the
+page's status write all take it and re-read the file under it, so the worker and the page cannot overwrite each other.
+
+### page polling
+
+`web/app.js` fetches `/api/view` every 5 seconds while the tab is visible. A failed poll changes nothing. New cards get a green
+outline until opened. The open job, the scroll positions and the open description are left alone unless that job's own card changed.

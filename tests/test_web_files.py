@@ -36,6 +36,13 @@ class WebFilesTests(unittest.TestCase):
         self.assertIn("safeUrl", js)
         self.assertRegex(js, r"https\?")  # only http and https are linked
 
+    def test_app_js_polls_only_when_visible(self):
+        js = self.read("app.js")
+        self.assertIn("setInterval", js)
+        self.assertIn("visibilityState", js)
+        self.assertRegex(js, r"fetch\(")  # still only the page's own api calls
+        self.assertNotRegex(js, r"""fetch\(\s*["']https?://""")
+
     def test_no_dependencies_or_build_step(self):
         self.assertFalse((WEB / "package.json").exists())
         self.assertFalse(list(WEB.glob("node_modules")))

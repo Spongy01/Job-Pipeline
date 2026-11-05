@@ -92,3 +92,5 @@ table.tally th { color:var(--muted); font-weight:600; font-size:12px; text-trans
 .muted { color:var(--muted); }
 .toast { position:fixed; right:16px; bottom:16px; background:var(--ink); color:#fff; padding:8px 14px; border-radius:6px; font-size:14px; }
 @media (max-width: 900px) { .body { grid-template-columns:1fr; } .nav { max-height:40vh; } }
+
+.card.fresh { border-color:var(--green); box-shadow:0 0 0 1px var(--green); }
