@@ -91,3 +91,80 @@ def consolidate_gaps(job):
         gap["single_model"] = len(gap["flagged_by"]) == 1 and len(ok_models) > 1
         out.append(gap)
     return out
+
+
+# ---------- tally ----------
+
+def tally_gaps(jobs):
+    """Count, over `jobs`, how many jobs each missing skill appears in."""
+    rows = {}
+    for job in jobs:
+        for gap in consolidate_gaps(job):
+            key = skill_key(gap["skill"])
+            row = rows.setdefault(key, {"names": {}, "job_ids": [], "models_flagged_max": 0,
+                                        "learnable": 0, "votes": 0, "required_count": 0, "preferred_count": 0})
+            row["names"][gap["skill"]] = row["names"].get(gap["skill"], 0) + 1
+            row["job_ids"].append(str(job["id"]))
+            row["models_flagged_max"] = max(row["models_flagged_max"], len(gap["flagged_by"]))
+            row["learnable"] += gap["learnable_votes"]
+            row["votes"] += len(gap["flagged_by"])
+            row[gap["kind"] + "_count"] += 1
+    out = []
+    for key, row in rows.items():
+        name = max(row["names"].items(), key=lambda kv: kv[1])[0]  # ties: first seen (dict order)
+        out.append({"skill": name, "jobs": len(row["job_ids"]), "job_ids": row["job_ids"],
+                    "models_flagged_max": row["models_flagged_max"],
+                    "learnable_share": row["learnable"] / row["votes"] if row["votes"] else 0.0,
+                    "required_count": row["required_count"], "preferred_count": row["preferred_count"]})
+    out.sort(key=lambda r: (-r["jobs"], skill_key(r["skill"])))
+    return out
+
+
+# ---------- projects and plan checks ----------
+
+def parse_projects(projects_md):
+    """Project names from a `Projects: A | B | C` line, else from `## N. Name (...)` headings."""
+    for line in projects_md.splitlines():
+        if line.strip().lower().startswith("projects:"):
+            return [n.strip() for n in line.split(":", 1)[1].split("|") if n.strip()]
+    names = []
+    for line in projects_md.splitlines():
+        m = re.match(r"##\s+\d+\.\s+(.+?)\s*(?:\(.*\))?\s*$", line)
+        if m:
+            names.append(m.group(1).strip())
+    return names
+
+
+def _norm(text):
+    return " ".join((text or "").lower().split())
+
+
+def check_plan(plan, resume_text, project_names):
+    """Flag, never drop. Returns (copy of plan with check flags, warning strings)."""
+    checked = {**plan,
+               "rewordings": [dict(r) for r in plan.get("rewordings", [])],
+               "project_extensions": [dict(e) for e in plan.get("project_extensions", [])]}
+    resume = _norm(resume_text)
+    known = {n.lower() for n in project_names}
+    warnings = []
+    for r in checked["rewordings"]:
+        quote = _norm(r.get("current_text"))
+        r["current_text_found"] = bool(quote) and quote in resume
+        if not r["current_text_found"]:
+            warnings.append("Reworded text not found in the resume: %r" % (r.get("current_text") or "")[:120])
+    for e in checked["project_extensions"]:
+        e["project_known"] = (e.get("project") or "").strip().lower() in known
+        if not e["project_known"]:
+            warnings.append("Project not found in projects.md: %r" % (e.get("project") or ""))
+    return checked, warnings
+
+
+def strip_em_dashes(value):
+    """Replace every U+2014 in all strings, recursively. Project rule: no em dashes in text to copy."""
+    if isinstance(value, str):
+        return value.replace("—", " - ")
+    if isinstance(value, list):
+        return [strip_em_dashes(v) for v in value]
+    if isinstance(value, dict):
+        return {k: strip_em_dashes(v) for k, v in value.items()}
+    return value

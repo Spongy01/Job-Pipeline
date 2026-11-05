@@ -116,5 +116,83 @@ class GapTests(unittest.TestCase):
         self.assertEqual((len(gaps), gaps[0]["models_total"], gaps[0]["single_model"]), (1, 1, False))
 
 
+class TallyTests(unittest.TestCase):
+    def test_tally_counts_jobs_per_skill_case_insensitively(self):
+        jobs = [job("1", enrichment={M9: result(required=[skill("AWS", "no", True)])}),
+                job("2", enrichment={M9: result(required=[skill("aws", "similar", False)])}),
+                job("3", enrichment={M9: result(preferred=[skill("Aws (any one)", "no", True)])}),
+                job("4", enrichment={M9: result(required=[skill("Go", "no", False)])})]
+        rows = bd.tally_gaps(jobs)
+        aws = rows[0]
+        self.assertEqual((aws["jobs"], aws["job_ids"], aws["required_count"], aws["preferred_count"]),
+                         (3, ["1", "2", "3"], 2, 1))
+        self.assertEqual(aws["skill"], "AWS")  # most common display name, ties to the first seen
+        self.assertAlmostEqual(aws["learnable_share"], 2 / 3)
+        self.assertEqual(aws["models_flagged_max"], 1)
+
+    def test_tally_sort_order(self):
+        jobs = [job("1", enrichment={M9: result(required=[skill("Zed", "no"), skill("Alpha", "no")])}),
+                job("2", enrichment={M9: result(required=[skill("Zed", "no")])})]
+        self.assertEqual([r["skill"] for r in bd.tally_gaps(jobs)], ["Zed", "Alpha"])
+        jobs = [job("1", enrichment={M9: result(required=[skill("Zed", "no"), skill("Alpha", "no")])})]
+        self.assertEqual([r["skill"] for r in bd.tally_gaps(jobs)], ["Alpha", "Zed"])
+
+    def test_tally_empty(self):
+        self.assertEqual(bd.tally_gaps([]), [])
+        self.assertEqual(bd.tally_gaps([job("1", enrichment={M9: result(required=[skill("Go", "yes")])})]), [])
+
+
+class ProjectsAndChecksTests(unittest.TestCase):
+    def test_parse_projects_from_projects_line(self):
+        md = "# Projects\n\nProjects: Conduit | BrokeNoMore |  Cardiology-QA\n\n## 1. Conduit (resume project)\n"
+        self.assertEqual(bd.parse_projects(md), ["Conduit", "BrokeNoMore", "Cardiology-QA"])
+
+    def test_parse_projects_falls_back_to_headings(self):
+        md = "## 1. Conduit (resume project)\n## 2. BrokeNoMore (resume project)\n## Other repos (shorter)\n"
+        self.assertEqual(bd.parse_projects(md), ["Conduit", "BrokeNoMore"])
+
+    RESUME = "Built a rate limiter with  Redis Lua scripts.\nInstrumented Prometheus metrics."
+
+    def plan(self):
+        return {"verdict": "v",
+                "rewordings": [{"current_text": "Built a rate limiter with Redis Lua scripts.", "suggested_text": "s"},
+                               {"current_text": "Invented line that is not there", "suggested_text": "s"}],
+                "project_extensions": [{"project": "conduit", "what_to_build": "x"},
+                                       {"project": "Imaginary", "what_to_build": "y"}]}
+
+    def test_check_plan_flags_unknown_project_and_missing_quote(self):
+        original = self.plan()
+        checked, warnings = bd.check_plan(original, self.RESUME, ["Conduit", "BrokeNoMore"])
+        self.assertEqual([r["current_text_found"] for r in checked["rewordings"]], [True, False])
+        self.assertEqual([e["project_known"] for e in checked["project_extensions"]], [True, False])
+        self.assertEqual(len(warnings), 2)
+        self.assertTrue(any("Invented line" in w for w in warnings))
+        self.assertTrue(any("Imaginary" in w for w in warnings))
+        self.assertNotIn("current_text_found", original["rewordings"][0])  # input untouched
+
+    def test_check_plan_does_not_drop_flagged_items(self):
+        checked, _ = bd.check_plan(self.plan(), self.RESUME, ["Conduit"])
+        self.assertEqual(len(checked["rewordings"]), 2)
+        self.assertEqual(len(checked["project_extensions"]), 2)
+
+    def test_check_plan_accepts_quote_with_different_whitespace_and_case(self):
+        plan = {"rewordings": [{"current_text": "BUILT A RATE LIMITER WITH REDIS\nLUA SCRIPTS."}],
+                "project_extensions": []}
+        checked, warnings = bd.check_plan(plan, self.RESUME, [])
+        self.assertTrue(checked["rewordings"][0]["current_text_found"])
+        self.assertEqual(warnings, [])
+
+    def test_check_plan_empty_quote_is_not_found(self):
+        checked, warnings = bd.check_plan({"rewordings": [{"current_text": ""}], "project_extensions": []}, self.RESUME, [])
+        self.assertFalse(checked["rewordings"][0]["current_text_found"])
+        self.assertEqual(len(warnings), 1)
+
+    def test_strip_em_dashes_nested(self):
+        value = {"a": "x \u2014 y", "b": ["p\u2014q", {"c": "no dash"}], "n": 3, "none": None}
+        out = bd.strip_em_dashes(value)
+        self.assertEqual(out, {"a": "x  -  y", "b": ["p - q", {"c": "no dash"}], "n": 3, "none": None})
+        self.assertNotIn("\u2014", str(out))
+
+
 if __name__ == "__main__":
     unittest.main()
