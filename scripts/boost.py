@@ -6,7 +6,8 @@ local Ollama model, a plan for each (rewordings, project extensions, a new proje
 plus a daily rollup of the skills that keep coming up as missing.
 
 Reads  runs/<date>/filtered.json, runs/<date>/enriched.json, config.json (resume_path, "models":
-       {"booster": ...} and an optional "boost" block {"top_n": 5}), resume/projects.md.
+       {"booster": ...} and an optional "boost" block {"type": "highest" | "all", "booster_count": 5}),
+       resume/projects.md.
 Writes runs/<date>/boost/<job_id>.json, runs/<date>/boost/specs/*.md,
        runs/<date>/boost_rollup.json, runs/<date>/boost.md.
 Never changes any input file. Prints one JSON line of counts; progress goes to stderr.
@@ -14,7 +15,7 @@ Exit is non-zero if an input is missing or corrupt, the model is not downloaded,
 plan or the rollup failed.
 
 Options:
-  --top-n N            jobs to plan (default: config boost.top_n, else 5)
+  --top-n N            jobs to plan (default: config boost.type/booster_count: the best 5, or all passed jobs)
   --model M            Ollama model (default: config models.booster, else qwen3.5:9b)
   --prompt-version V   prompts/boost/<V>.py (default v1)
   --force              redo plans and the rollup that already exist for this prompt version
@@ -198,13 +199,35 @@ def reusable(path, version, force):
     return record if record.get("ok") and record.get("prompt_version") == version else None
 
 
+def resolve_selection(boost_cfg, cli_top_n=None):
+    """How many jobs get a plan: an int, or None for "all passed jobs".
+
+    config.json "boost": {"type": "highest" | "all", "booster_count": N}. type "highest" (the default)
+    plans the N best-scored passed jobs (booster_count, else the older top_n, else 5); "all" plans every
+    passed job and ignores the count. A count given on the command line (--top-n) wins over the config.
+    """
+    if cli_top_n:
+        return cli_top_n
+    if not isinstance(boost_cfg, dict):
+        raise LLMError('config.json "boost" must be an object like {"type": "highest", "booster_count": 5}')
+    kind = boost_cfg.get("type", "highest")
+    if kind not in ("highest", "all"):
+        raise LLMError('config.json boost.type must be "highest" or "all", got %r' % (kind,))
+    if kind == "all":
+        return None
+    count = boost_cfg.get("booster_count", boost_cfg.get("top_n", DEFAULT_TOP_N))
+    if isinstance(count, bool) or not isinstance(count, int) or count < 1:
+        raise LLMError("config.json boost.booster_count must be a whole number of 1 or more, got %r" % (count,))
+    return count
+
+
 def run(root, run_date, top_n=None, model=None, prompt_version="v1", force=False, num_ctx=DEFAULT_NUM_CTX,
         retries=1, think=False, client=None, resume_text=None, unload=True, log=lambda m: None):
     root = Path(root)
     run_dir = root / "runs" / run_date
     config = load_json(root / "config.json", "config.json")
     boost_cfg = config.get("boost") or {}
-    top_n = top_n or boost_cfg.get("top_n") or DEFAULT_TOP_N
+    top_n = resolve_selection(boost_cfg, top_n)
     model = model or models_from_config(config)[1] or DEFAULT_MODEL
     filtered = load_json(run_dir / "filtered.json", "filtered.json")
     enriched = load_json(run_dir / "enriched.json", "enriched.json")
@@ -223,6 +246,8 @@ def run(root, run_date, top_n=None, model=None, prompt_version="v1", force=False
     check_models(client, [model])
 
     passed = bd.passed_jobs(enriched, filtered)
+    if top_n is None:  # boost.type "all"
+        top_n = len(passed)
     selection = bd.select_top(passed, model, top_n)
     notes = []
     if not passed:

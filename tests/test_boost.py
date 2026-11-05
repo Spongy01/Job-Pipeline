@@ -274,6 +274,45 @@ class RunTests(BoostTestCase):
         self.assertEqual(boost.run(self.tmp, DATE, client=FakeClient(), resume_text=RESUME)["selected"], 2)
         self.assertEqual(boost.run(self.tmp, DATE, top_n=4, client=FakeClient(), resume_text=RESUME)["selected"], 4)
 
+    def boost_selected(self, boost_cfg, n_jobs=7, **kw):
+        self.setup_jobs([make_job(str(i), 50 + i) for i in range(1, n_jobs + 1)])
+        (self.tmp / "config.json").write_text(json.dumps({"resume_path": "x", "boost": boost_cfg}))
+        return boost.run(self.tmp, DATE, client=FakeClient(), resume_text=RESUME, **kw)["selected"]
+
+    def test_boost_type_all_plans_every_passed_job(self):
+        self.assertEqual(self.boost_selected({"type": "all"}), 7)
+
+    def test_boost_type_all_ignores_booster_count(self):
+        self.assertEqual(self.boost_selected({"type": "all", "booster_count": 2}), 7)
+
+    def test_boost_type_highest_uses_booster_count(self):
+        self.assertEqual(self.boost_selected({"type": "highest", "booster_count": 2}), 2)
+
+    def test_boost_type_highest_without_count_defaults_to_five(self):
+        self.assertEqual(self.boost_selected({"type": "highest"}), 5)
+
+    def test_no_boost_block_is_highest_five(self):
+        self.setup_jobs([make_job(str(i), 50 + i) for i in range(1, 8)])
+        (self.tmp / "config.json").write_text(json.dumps({"resume_path": "x"}))
+        self.assertEqual(boost.run(self.tmp, DATE, client=FakeClient(), resume_text=RESUME)["selected"], 5)
+
+    def test_cli_top_n_overrides_type_all(self):
+        self.assertEqual(self.boost_selected({"type": "all"}, top_n=3), 3)
+
+    def test_type_all_with_no_passed_jobs_selects_nothing(self):
+        self.setup_jobs([make_job("1")], passed=[], rejected=["1"])
+        (self.tmp / "config.json").write_text(json.dumps({"resume_path": "x", "boost": {"type": "all"}}))
+        summary = boost.run(self.tmp, DATE, client=FakeClient(), resume_text=RESUME)
+        self.assertEqual(summary["selected"], 0)
+
+    def test_bad_boost_config_is_an_error(self):
+        self.setup_jobs([make_job("1")])
+        for bad in ({"type": "some"}, {"type": "highest", "booster_count": 0}, {"type": "highest", "booster_count": "3"},
+                    {"type": "highest", "booster_count": True}, {"type": "highest", "booster_count": 2.5}, "all", ["all"]):
+            (self.tmp / "config.json").write_text(json.dumps({"resume_path": "x", "boost": bad}))
+            with self.assertRaises(boost.LLMError, msg=repr(bad)):
+                boost.run(self.tmp, DATE, client=FakeClient(), resume_text=RESUME)
+
     def write_config(self, data):
         (self.tmp / "config.json").write_text(json.dumps({"resume_path": "x", **data}))
 

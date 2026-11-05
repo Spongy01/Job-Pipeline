@@ -85,6 +85,10 @@ Models: `--models`, or else `models.enricher` in `config.json` (a model name or 
 side by side). The boost step uses `models.booster` (one model, default qwen3.5:9b; `--model` overrides). A bad value in
 `config.json` is an error; the scripts never write to `config.json`.
 
+Which jobs the boost step plans: `config.json` `"boost": {"type": "highest" | "all", "booster_count": N}`. `highest` (the default) plans the N best-scored
+passed jobs (`booster_count`, else the older `top_n`, else 5). `all` plans every passed job and ignores the count. `--top-n` on the
+command line overrides both. The rollup always covers all passed jobs.
+
 Reads `runs/<date>/clean.json`, the resume text from `config.json` `resume_path` (PDF, via
 pypdf), and the prompt `prompts/enrich/<version>.py`. Writes `runs/<date>/enriched.json`
 (or `--out-dir`). Closed jobs are skipped. Existing ok entries for the same model and prompt
