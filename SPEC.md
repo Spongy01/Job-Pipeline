@@ -183,3 +183,51 @@ A list, one record per job in enriched.json order: `id`, `company`, `posting_nam
 
 `filter_report.json` has `counts`, `rejected_by_rule`, `rules_applied`, `rules_set_but_not_applied`, and
 the list of rejected jobs with the rules that rejected them.
+
+## merge step (scripts/merge.py)
+
+    python3 scripts/merge.py [YYYY-MM-DD]
+
+Merges one run into `jobs.json` (a list) and `rollups.json` (an object keyed by run date). Reads
+`runs/<date>/enriched.json`, `filtered.json`, `boost/<id>.json` and `boost_rollup.json`. Prints one JSON line
+(`jobs_in_run`, `added`, `filled`, `unchanged`, `rollup`). Missing or corrupt input: non-zero exit, nothing written.
+
+Each job record is the enriched job (all clean fields, `enrichment` keyed by model, `jd_flags`) plus:
+
+| field | notes |
+|---|---|
+| filter | `{stage, reasons, years_required, years_model}` from filtered.json, or null |
+| boost | the job's boost record (only if it succeeded), or null. `spec_text` holds the text of its spec file when there is one |
+| stage | the filter stage (passed, rejected, closed), else "enriched" |
+| run_date | the date of the run in which the job was first merged |
+| user_status | null, "applied" or "skipped". Set only by the page; the merge never touches it |
+
+Never overwrites: a job already in `jobs.json` only gets sections that are missing or null (for example a boost plan
+that arrived a day later, or an enrichment model that was not there). Nothing is rewritten, and no `.bak` made, when
+nothing changed. A rollup date already in `rollups.json` is kept; to take in a regenerated rollup, delete that date's key
+and merge again. `jobs.json`, `jobs.json.bak` and `rollups.json` are git ignored.
+
+## jobs page (scripts/serve.py, scripts/jobs_query.py, web/)
+
+    python3 scripts/serve.py [--port 8765]      then open http://localhost:8765
+
+A standard library server bound to 127.0.0.1. It refuses to start when jobs.json is corrupt. Every request needs a Host
+of localhost or 127.0.0.1.
+
+| route | what |
+|---|---|
+| GET / and /static/<file> | the page (`web/`); nothing outside `web/` is served |
+| GET /api/view?range=today\|yesterday\|from&from=&sort=score\|recent&show=all\|passed\|rejected\|flagged\|boost&status=any\|new\|applied\|skipped&model=&q= | cards for the left nav, a score series and average per model, counts per filter, the date range, `latest_run_date`, `empty` |
+| GET /api/job/<id>, GET /api/rollup/<date> | the full record, that day's rollup |
+| POST /api/job/<id>/status `{"status": "applied" \| "skipped" \| null}` | the only write: `user_status` of that one job (atomic, with a `.bak`) |
+
+All filtering, sorting and graph series are computed in `scripts/jobs_query.py`. "Today" means jobs whose `run_date` is
+today's date (if there are none the page offers the latest run). "Flagged" means sponsorship refused, a clearance or
+citizenship flag, or a clean-step review flag. Sorting by score uses the chosen model (default qwen3.5:9b, or the
+average), ties broken by the required-skills part, then id; "most recent" uses `scraped_at`.
+
+The page (`web/index.html`, `style.css`, `app.js`) is plain HTML, CSS and JavaScript with no dependencies and no network
+requests. Data is inserted with `textContent` only and links from data must be http or https. Layout: a top bar with a
+score graph per model found in the data (dashed line is the average) and the controls, a scrollable nav of job cards with
+a pinned rollup card, and the selected job on the right. Up and down (or j and k) move between jobs; the controls are
+remembered in the browser.

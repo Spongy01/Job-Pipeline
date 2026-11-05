@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Job Pipeline</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="app">
+  <header id="topbar" class="topbar">
+    <div class="brand">Job Pipeline</div>
+    <div id="charts" class="charts"></div>
+    <div class="controls">
+      <div class="ctl"><label>Time frame</label><span id="ctl-range" class="seg">
+        <span data-value="today">Today</span><span data-value="yesterday">Yesterday</span><span data-value="from">From date</span></span></div>
+      <div class="ctl"><label for="ctl-from">From</label><input id="ctl-from" type="date"></div>
+      <div class="ctl"><label>Sort</label><span id="ctl-sort" class="seg">
+        <span data-value="score">Most scored</span><span data-value="recent">Most recent</span></span></div>
+      <div class="ctl"><label for="ctl-show">Show</label><select id="ctl-show">
+        <option value="all">All</option><option value="passed">Passed filter</option><option value="rejected">Rejected</option>
+        <option value="flagged">Flagged</option><option value="boost">With boost plan</option></select></div>
+      <div class="ctl"><label for="ctl-model">Score model</label><select id="ctl-model"></select></div>
+      <div class="ctl"><label for="ctl-status">Status</label><select id="ctl-status">
+        <option value="any">Any</option><option value="new">New</option><option value="applied">Applied</option>
+        <option value="skipped">Skipped</option></select></div>
+      <div class="ctl"><label for="ctl-search">Search</label><input id="ctl-search" type="text" placeholder="title, company, skill"></div>
+    </div>
+  </header>
+  <div class="body">
+    <nav id="nav" class="nav" aria-label="Jobs"></nav>
+    <main id="main" class="main"></main>
+  </div>
+</div>
+<script src="/static/app.js"></script>
+</body>
+</html>
