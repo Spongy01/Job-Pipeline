@@ -84,6 +84,30 @@ def fill_missing(existing, new):
     return changed
 
 
+def merge_one(root, run_date, job, filter_record):
+    """Merge a single enriched job into jobs.json (same never-overwrite rules as merge_run).
+    Returns "added", "filled" or "unchanged"."""
+    root = Path(root)
+    with jobs_lock(root):
+        jobs = load_json(root / "jobs.json", "jobs.json", default=[])
+        if not isinstance(jobs, list):
+            raise MergeError("jobs.json must contain a JSON list")
+        record = build_record(job, filter_record, None, run_date)
+        existing = next((j for j in jobs if str(j["id"]) == str(job["id"])), None)
+        if existing is None:
+            jobs.append(record)
+            result = "added"
+        elif fill_missing(existing, record):
+            result = "filled"
+        else:
+            return "unchanged"
+        jobs_path = root / "jobs.json"
+        if jobs_path.exists():
+            shutil.copyfile(jobs_path, root / "jobs.json.bak")
+        write_json_atomic(jobs_path, jobs)
+        return result
+
+
 def merge_run(root, run_date):
     with jobs_lock(root):
         return _merge_run(root, run_date)

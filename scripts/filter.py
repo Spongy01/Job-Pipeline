@@ -101,18 +101,8 @@ def evaluate(job, rules, preferred_model=DEFAULT_MODEL):
     return record
 
 
-def run(root, run_date, model=DEFAULT_MODEL, input_name="enriched.json"):
-    root = Path(root)
-    run_dir = root / "runs" / run_date
-    config = load_json(root / "config.json", "config.json")
-    rules = config.get("rules")
-    if not isinstance(rules, dict):
-        raise FilterError('config.json has no "rules" object')
-    jobs = load_json(run_dir / input_name, input_name)
-    if not isinstance(jobs, list):
-        raise FilterError("%s must contain a JSON list" % input_name)
-
-    records = [evaluate(job, rules, model) for job in jobs]
+def build_report(records, rules, model):
+    """Return (counts, report) for a list of decision records."""
     by_rule = {}
     for r in records:
         for reason in r["reasons"]:
@@ -131,9 +121,43 @@ def run(root, run_date, model=DEFAULT_MODEL, input_name="enriched.json"):
         "rejected": [{"id": r["id"], "company": r["company"], "posting_name": r["posting_name"],
                       "reasons": [x["rule"] for x in r["reasons"]]} for r in records if r["stage"] == "rejected"],
     }
+    return counts, report
+
+
+def _rules(root):
+    config = load_json(Path(root) / "config.json", "config.json")
+    rules = config.get("rules")
+    if not isinstance(rules, dict):
+        raise FilterError('config.json has no "rules" object')
+    return rules
+
+
+def run(root, run_date, model=DEFAULT_MODEL, input_name="enriched.json"):
+    root = Path(root)
+    run_dir = root / "runs" / run_date
+    rules = _rules(root)
+    jobs = load_json(run_dir / input_name, input_name)
+    if not isinstance(jobs, list):
+        raise FilterError("%s must contain a JSON list" % input_name)
+
+    records = [evaluate(job, rules, model) for job in jobs]
+    counts, report = build_report(records, rules, model)
     write_json_atomic(run_dir / "filtered.json", records)
     write_json_atomic(run_dir / "filter_report.json", report)
-    return {"date": run_date, **counts, "rejected_by_rule": by_rule}
+    return {"date": run_date, **counts, "rejected_by_rule": report["rejected_by_rule"]}
+
+
+def rebuild_report(root, run_date, model=DEFAULT_MODEL):
+    """Write filter_report.json from the existing filtered.json (used by the streaming worker)."""
+    root = Path(root)
+    run_dir = root / "runs" / run_date
+    rules = _rules(root)
+    records = load_json(run_dir / "filtered.json", "filtered.json")
+    if not isinstance(records, list):
+        raise FilterError("filtered.json must contain a JSON list")
+    counts, report = build_report(records, rules, model)
+    write_json_atomic(run_dir / "filter_report.json", report)
+    return counts
 
 
 def main(argv):

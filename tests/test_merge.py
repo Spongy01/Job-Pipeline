@@ -53,6 +53,49 @@ class MergeTestCase(unittest.TestCase):
         return merge.merge_run(self.tmp, date)
 
 
+class MergeOneTests(MergeTestCase):
+    def one(self, job, rec="auto"):
+        rec = filtered_rec(job["id"]) if rec == "auto" else rec
+        return merge.merge_one(self.tmp, DATE, job, rec)
+
+    def test_merge_one_adds_then_unchanged(self):
+        self.assertEqual(self.one(enriched_job("1")), "added")
+        self.assertEqual(self.one(enriched_job("1")), "unchanged")
+        record = self.by_id("1")
+        self.assertEqual((record["stage"], record["run_date"], record["user_status"]), ("passed", DATE, None))
+        self.assertEqual(len(self.jobs()), 1)
+
+    def test_merge_one_fills_missing_model_only(self):
+        self.one(enriched_job("1", models=(M9,)))
+        self.assertEqual(self.one(enriched_job("1", models=(M9, MG))), "filled")
+        self.assertEqual(sorted(self.by_id("1")["enrichment"]), sorted([M9, MG]))
+
+    def test_merge_one_keeps_user_status_and_run_date(self):
+        self.one(enriched_job("1"))
+        jobs = self.jobs()
+        jobs[0]["user_status"] = "applied"
+        (self.tmp / "jobs.json").write_text(json.dumps(jobs))
+        merge.merge_one(self.tmp, "2030-01-01", enriched_job("1", models=(M9, MG)), filtered_rec("1", stage="rejected"))
+        self.assertEqual((self.by_id("1")["user_status"], self.by_id("1")["run_date"]), ("applied", DATE))
+
+    def test_merge_one_corrupt_jobs_json_raises_and_writes_nothing(self):
+        (self.tmp / "jobs.json").write_text("[{corrupt")
+        with self.assertRaises(merge.MergeError):
+            self.one(enriched_job("1"))
+        self.assertEqual((self.tmp / "jobs.json").read_text(), "[{corrupt")
+        self.assertFalse((self.tmp / "jobs.json.bak").exists())
+
+    def test_merge_one_writes_bak_before_change(self):
+        self.one(enriched_job("1"))
+        before = (self.tmp / "jobs.json").read_text()
+        self.one(enriched_job("2"))
+        self.assertEqual((self.tmp / "jobs.json.bak").read_text(), before)
+
+    def test_merge_one_without_filter_record_is_enriched_stage(self):
+        self.one(enriched_job("1"), rec=None)
+        self.assertEqual(self.by_id("1")["stage"], "enriched")
+
+
 class MergeTests(MergeTestCase):
     def test_merge_waits_for_lock(self):
         import threading
