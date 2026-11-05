@@ -19,3 +19,22 @@ def jobs_lock(root):
             yield
         finally:
             fcntl.flock(handle, fcntl.LOCK_UN)
+
+
+class AlreadyRunning(Exception):
+    pass
+
+
+@contextmanager
+def worker_lock(root):
+    """Held by the worker for its whole life, so a second worker cannot start on the same project."""
+    path = Path(root) / ".worker.lock"
+    with open(path, "a") as handle:
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise AlreadyRunning("another worker is already running (lock: %s)" % path)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle, fcntl.LOCK_UN)

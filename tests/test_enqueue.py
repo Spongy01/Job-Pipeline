@@ -127,6 +127,23 @@ class EnqueueTests(EnqueueTestCase):
         self.assertEqual(queued["description"], nasty)
         self.assertEqual(self.raw(date=jobqueue.read_run(self.tmp)["date"])[0]["description"], nasty)
 
+    def test_lone_surrogate_is_scrubbed_not_a_crash(self):
+        payload = '{"id": "100", "posting_name": "E", "company": "A", "linkedin_url": "https://x/1", "description": "cut \\ud83d here"}'
+        r = self.cli("enqueue.py", "-", stdin=payload)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads(r.stdout)["status"], "queued")
+        self.assertNotIn("Traceback", r.stderr)
+        queued = json.loads((self.tmp / "queue" / "pending" / "100.json").read_text(encoding="utf-8"))
+        self.assertIn("cut", queued["description"])
+
+    def test_invalid_utf8_on_stdin_is_not_a_traceback(self):
+        raw = b'{"id": "100", "posting_name": "E", "company": "A", "linkedin_url": "https://x/1", "description": "bad \xff byte"}'
+        r = subprocess.run([sys.executable, str(self.tmp / "scripts" / "enqueue.py"), "-"], input=raw,
+                           capture_output=True, cwd="/", timeout=30)
+        self.assertNotIn(b"Traceback", r.stderr)
+        self.assertEqual(len(r.stdout.strip().splitlines()), 1)
+        self.assertEqual(json.loads(r.stdout)["status"], "queued")
+
     def test_concurrent_same_id_queues_once(self):
         payload = json.dumps(raw_job("100"))
         with ThreadPoolExecutor(4) as pool:

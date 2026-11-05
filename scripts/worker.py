@@ -27,6 +27,7 @@ import jobqueue  # noqa: E402
 import merge  # noqa: E402
 from enrich import load_resume_text, resolve_models  # noqa: E402
 from llm import LLMError, check_models, load_prompt, unload_model  # noqa: E402
+from jobslock import AlreadyRunning, worker_lock  # noqa: E402
 from pipeline_job import JobPipeline  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -47,7 +48,11 @@ def _process_with_retry(pipeline, job_id, job, log):
     last = None
     for attempt in range(1, ATTEMPTS + 1):
         try:
-            return pipeline.process(job), None
+            outcome = pipeline.process(job)
+            if outcome["failed_models"] and attempt < ATTEMPTS:
+                log("   job %s: model(s) %s failed, trying them again" % (job_id, ", ".join(outcome["failed_models"])))
+                continue
+            return outcome, None
         except Exception as e:  # a model crash, a bad reply, a corrupt file: this job fails, the worker goes on
             last = "%s: %s" % (type(e).__name__, e)
             log("   job %s attempt %d failed: %s" % (job_id, attempt, last))
@@ -86,8 +91,14 @@ def _end_steps(root, run_date, client, resume_text, boost_run, log):
     return ("failed", "; ".join(errors)) if errors else ("ok", None)
 
 
-def run_worker(root, client=None, resume_text=None, boost_run=None, poll_seconds=2.0, sleep=time.sleep,
-               log=lambda m: None, prompt=None, prompt_version=DEFAULT_PROMPT_VERSION):
+def run_worker(root, **kwargs):
+    """See _run_worker. Only one worker can run per project: a second one raises AlreadyRunning."""
+    with worker_lock(root):
+        return _run_worker(root, **kwargs)
+
+
+def _run_worker(root, client=None, resume_text=None, boost_run=None, poll_seconds=2.0, sleep=time.sleep,
+                log=lambda m: None, prompt=None, prompt_version=DEFAULT_PROMPT_VERSION):
     root = Path(root)
     boost_run = boost_run or boost.run
     # preflight: everything that can be wrong is checked before the queue is touched
@@ -126,6 +137,13 @@ def run_worker(root, client=None, resume_text=None, boost_run=None, poll_seconds
                     summary["processed"] += 1
                     log("   %s (%s)" % (outcome["stage"], outcome["merge"]))
                 else:
+                    try:
+                        check_models(client, models)
+                    except LLMError as down:  # Ollama or a model is gone: this is not the job's fault
+                        jobqueue.release(root, job_id)
+                        log("   Ollama is not usable (%s); job %s stays queued, waiting" % (down, job_id))
+                        sleep(poll_seconds * 5)
+                        continue
                     jobqueue.fail(root, job_id, error)
                     pipeline.discard(job_id)
                     summary["failed"] += 1
@@ -154,7 +172,7 @@ def main(argv):
     try:
         summary = run_worker(ROOT, poll_seconds=args.poll, prompt_version=args.prompt_version,
                              log=lambda m: print(m, file=sys.stderr, flush=True))
-    except (LLMError, jobqueue.QueueError) as e:
+    except (LLMError, jobqueue.QueueError, AlreadyRunning) as e:
         print(json.dumps({"status": "error", "error": str(e)}))
         sys.exit(1)
     print(json.dumps(summary))

@@ -77,7 +77,9 @@ def fill_missing(existing, new):
                 existing["enrichment"], changed = dict(value), True
                 continue
             for model, entry in value.items():
-                if model not in have:
+                current = have.get(model)
+                # a model that failed earlier is replaced by a later ok result; an ok entry is never replaced
+                if model not in have or (isinstance(current, dict) and not current.get("ok") and entry.get("ok")):
                     have[model], changed = entry, True
         elif existing.get(key) is None:
             existing[key], changed = value, True

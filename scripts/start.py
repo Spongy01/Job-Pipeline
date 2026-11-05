@@ -10,6 +10,7 @@ after stoppipeline.py, the page and Ollama keep running until Ctrl-C.
 """
 import argparse
 import json
+import signal
 import socket
 import subprocess
 import sys
@@ -55,6 +56,14 @@ def main(argv, spawn=subprocess.Popen, wait=time.sleep, ollama_check=None, port_
         sys.exit("start.py: %s not found. Create it with: python3 -m venv .venv && .venv/bin/pip install -r requirements.txt" % python)
 
     started = []
+
+    def on_term(signum, frame):
+        raise KeyboardInterrupt  # a plain `kill` stops everything we started, like Ctrl-C
+
+    try:
+        previous_term = signal.signal(signal.SIGTERM, on_term)
+    except ValueError:  # not the main thread
+        previous_term = None
     try:
         if ollama_check():
             _say(component="ollama", status="already running")
@@ -90,6 +99,8 @@ def main(argv, spawn=subprocess.Popen, wait=time.sleep, ollama_check=None, port_
     except KeyboardInterrupt:
         return 0
     finally:
+        if previous_term is not None:
+            signal.signal(signal.SIGTERM, previous_term)
         for proc in started:
             proc.terminate()
         for proc in started:

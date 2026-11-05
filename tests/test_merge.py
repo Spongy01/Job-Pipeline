@@ -58,6 +58,21 @@ class MergeOneTests(MergeTestCase):
         rec = filtered_rec(job["id"]) if rec == "auto" else rec
         return merge.merge_one(self.tmp, DATE, job, rec)
 
+    def test_merge_one_replaces_a_failed_model_entry_with_an_ok_one(self):
+        failed = enriched_job("1")
+        failed["enrichment"][MG] = {"ok": False, "error": "boom"}
+        self.one(failed)
+        self.assertFalse(self.by_id("1")["enrichment"][MG]["ok"])
+        self.assertEqual(self.one(enriched_job("1")), "filled")
+        self.assertTrue(self.by_id("1")["enrichment"][MG]["ok"])
+
+    def test_merge_one_never_replaces_an_ok_entry(self):
+        self.one(enriched_job("1"))
+        other = enriched_job("1")
+        other["enrichment"][M9] = {"ok": True, "data": {"score": 1}}
+        self.assertEqual(self.one(other), "unchanged")
+        self.assertEqual(self.by_id("1")["enrichment"][M9]["data"]["score"], 80)
+
     def test_merge_one_adds_then_unchanged(self):
         self.assertEqual(self.one(enriched_job("1")), "added")
         self.assertEqual(self.one(enriched_job("1")), "unchanged")

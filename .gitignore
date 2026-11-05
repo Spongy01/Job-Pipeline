@@ -9,3 +9,4 @@ __pycache__/
 rollups.json
 queue/
 .jobs.lock
+.worker.lock

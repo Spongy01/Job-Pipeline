@@ -38,8 +38,21 @@ def _load_list(path, what):
     return data
 
 
+def _scrub(value):
+    """Replace anything that cannot be written as UTF-8 (for example a lone surrogate from a description
+    cut in the middle of an emoji) so one odd character cannot lose a job."""
+    if isinstance(value, str):
+        return value.encode("utf-8", "replace").decode("utf-8")
+    if isinstance(value, list):
+        return [_scrub(v) for v in value]
+    if isinstance(value, dict):
+        return {_scrub(k): _scrub(v) for k, v in value.items()}
+    return value
+
+
 def enqueue(root, job, today=None):
     root = Path(root)
+    job = _scrub(job)
     job_id, reason = validate(job)
     if reason:
         raise EnqueueError("invalid job: %s" % reason)
@@ -73,7 +86,7 @@ def main(argv):
     if len(argv) != 1:
         print(json.dumps({"status": "error", "error": "usage: enqueue.py '<job json>' | -"}))
         sys.exit(1)
-    text = sys.stdin.read() if argv[0] == "-" else argv[0]
+    text = sys.stdin.buffer.read().decode("utf-8", "replace") if argv[0] == "-" else argv[0]
     try:
         try:
             job = json.loads(text)
@@ -82,7 +95,7 @@ def main(argv):
         if not isinstance(job, dict):
             raise EnqueueError("the job must be a JSON object")
         result = enqueue(ROOT, job)
-    except EnqueueError as e:
+    except (EnqueueError, UnicodeError, OSError) as e:
         print(json.dumps({"status": "error", "error": str(e)}))
         sys.exit(1)
     print(json.dumps(result))

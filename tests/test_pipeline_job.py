@@ -69,7 +69,7 @@ class PipelineTestCase(unittest.TestCase):
 class ProcessTests(PipelineTestCase):
     def test_open_job_runs_every_model_and_lands_in_jobs_json(self):
         out = self.pipe().process(raw_job())
-        self.assertEqual(out, {"id": "100", "stage": "passed", "merge": "added"})
+        self.assertEqual(out, {"id": "100", "stage": "passed", "merge": "added", "failed_models": []})
         self.assertEqual(self.calls, [("100", M9), ("100", MG)])
         record = self.jobs()[0]
         self.assertEqual(sorted(record["enrichment"]), sorted([M9, MG]))
@@ -115,6 +115,15 @@ class ProcessTests(PipelineTestCase):
     def test_one_model_failing_still_lands_the_job(self):
         self.results = {M9: bad()}
         self.assertEqual(self.pipe().process(raw_job())["merge"], "added")
+
+    def test_failed_model_is_reported_and_filled_by_a_later_pass(self):
+        self.results = {M9: bad()}
+        out = self.pipe().process(raw_job())
+        self.assertEqual(out["failed_models"], [M9])
+        self.results = {}
+        out = self.pipe().process(raw_job())
+        self.assertEqual((out["failed_models"], out["merge"]), ([], "filled"))
+        self.assertTrue(self.jobs()[0]["enrichment"][M9]["ok"])
 
     def test_rejected_job_is_in_jobs_json_with_stage_rejected(self):
         self.results = {M9: good(years=(("overall", "required", 6, 8),))}

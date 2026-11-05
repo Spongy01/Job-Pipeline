@@ -8,6 +8,7 @@ from pathlib import Path
 SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 import jobqueue  # noqa: E402
+import jobslock  # noqa: E402
 import llm  # noqa: E402
 import pipeline_job  # noqa: E402
 import worker  # noqa: E402
@@ -177,6 +178,55 @@ class WorkerTests(WorkerTestCase):
         self.assertEqual(result["end_steps"], "failed")
         self.assertIsNotNone(jobqueue.read_run(self.tmp))
         self.assertEqual(len(self.jobs()), 1)  # the merge still ran
+
+    def test_failed_model_is_retried_within_the_job(self):
+        self.queue("1")
+        outcomes = iter([{"ok": False, "prompt_version": "v-test", "generated_at": "t", "seconds": 0, "attempts": 2, "error": "bad json"}])
+        orig = self.fake_enrich
+
+        def flaky(client, model, prompt, resume_text, job, num_ctx, think, retries):
+            if model == MG:
+                first = next(outcomes, None)
+                if first:
+                    self.enrich_calls.append((job["id"], model))
+                    return first
+            return orig(client, model, prompt, resume_text, job, num_ctx, think, retries)
+
+        pipeline_job.enrich_one = flaky
+        self.go()
+        self.assertTrue(self.jobs()[0]["enrichment"][MG]["ok"])
+        self.assertEqual(self.enrich_calls.count(("1", MG)), 2)
+        self.assertEqual(self.enrich_calls.count(("1", M9)), 1)  # the model that worked is not redone
+
+    def test_ollama_outage_leaves_jobs_pending_not_failed(self):
+        self.queue("1", "2")
+        state = {"n": 0, "down": True}
+
+        def lst():
+            state["n"] += 1
+            if state["n"] > 1 and state["down"]:
+                raise ConnectionError("server down")
+            return {"models": [{"model": M9}, {"model": MG}]}
+
+        self.client.list = lst
+        self.broken_ids = {"1", "2"}
+
+        def recover(n):
+            if n == 1:
+                state["down"] = False
+                self.broken_ids.clear()
+
+        result = self.go(stop_after_sleeps=3, on_sleep=recover)
+        self.assertEqual((result["processed"], result["failed"]), (2, 0))
+        self.assertEqual(jobqueue.counts(self.tmp)["failed"], 0)
+        self.assertEqual(sorted(j["id"] for j in self.jobs()), ["1", "2"])
+
+    def test_second_worker_refuses_to_start(self):
+        self.queue("1")
+        with jobslock.worker_lock(self.tmp):
+            with self.assertRaises(jobslock.AlreadyRunning):
+                self.go()
+        self.assertEqual(jobqueue.counts(self.tmp), {"pending": 1, "processing": 0, "failed": 0})
 
     def test_success_removes_run_json(self):
         self.queue("1")

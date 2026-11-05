@@ -91,7 +91,8 @@ class JobPipeline:
         decision = jobfilter.evaluate(entry, self.rules, self.filter_model)
         _upsert(self.run_dir / "filtered.json", decision)
         merged = merge_one(self.root, self.run_date, entry, decision)
-        return {"id": job_id, "stage": decision["stage"], "merge": merged}
+        failed = [m for m in self.models if needs_models and not entry["enrichment"].get(m, {}).get("ok")]
+        return {"id": job_id, "stage": decision["stage"], "merge": merged, "failed_models": failed}
 
     def discard(self, job_id):
         """Drop a job that failed for good from the run files, so the final merge does not take

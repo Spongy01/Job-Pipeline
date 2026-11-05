@@ -123,6 +123,13 @@ def requeue_failed(root, job_id):
     return True
 
 
+def release(root, job_id):
+    """Put one job the worker has taken back in pending (used when the cause was Ollama, not the job)."""
+    source = _dir(root, "processing") / ("%s.json" % job_id)
+    if source.exists():
+        os.replace(source, _dir(root, "pending") / source.name)
+
+
 def recover(root):
     moved = 0
     for source in _dir(root, "processing").glob("*.json"):

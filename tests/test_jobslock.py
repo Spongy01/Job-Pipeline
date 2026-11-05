@@ -39,6 +39,14 @@ class JobsLockTests(unittest.TestCase):
         with jobslock.jobs_lock(self.tmp):
             self.assertTrue((self.tmp / ".jobs.lock").exists())
 
+    def test_worker_lock_is_exclusive_and_released(self):
+        with jobslock.worker_lock(self.tmp):
+            with self.assertRaises(jobslock.AlreadyRunning):
+                with jobslock.worker_lock(self.tmp):
+                    pass
+        with jobslock.worker_lock(self.tmp):  # free again
+            pass
+
 
 if __name__ == "__main__":
     unittest.main()

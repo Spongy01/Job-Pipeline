@@ -59,6 +59,14 @@ class QueueTests(QueueTestCase):
         self.assertEqual(jq.claim_next(self.tmp), ("1", job))
         self.assertFalse(jq.requeue_failed(self.tmp, "1"))
 
+    def test_release_returns_one_job_to_pending(self):
+        self.put("1")
+        self.put("2")
+        jq.claim_next(self.tmp)
+        jq.claim_next(self.tmp)
+        jq.release(self.tmp, "1")
+        self.assertEqual([jq.state_of(self.tmp, i) for i in "12"], ["pending", "processing"])
+
     def test_state_of_each_state(self):
         self.put("1")
         self.put("2")

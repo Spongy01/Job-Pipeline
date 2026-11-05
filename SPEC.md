@@ -281,19 +281,23 @@ Preflight first (config, `models.enricher` downloaded and Ollama reachable, resu
 is touched. Per job (`scripts/pipeline_job.py`): clean, `enrich_one` for every model that has no ok result yet for this prompt version,
 `jd_flags`, `filter.evaluate`, then `merge.merge_one`. `runs/<date>/clean.json`, `enriched.json` and `filtered.json` are updated one
 entry at a time (the entry with the same id is replaced) and keep the schemas above. Closed jobs and jobs without a description make
-no model call. A job gets two attempts, then goes to `queue/failed/` and its partial entries are removed from the run files.
+no model call. A job gets two attempts (a model that returned no usable result counts as a failed attempt, and a later ok result replaces it in `jobs.json`), then goes to `queue/failed/`; if Ollama itself is unreachable the job goes back to pending instead and the worker waits and its partial entries are removed from the run files.
 
 When `stopping` is set and the queue is empty, the end-of-run steps run: `filter_report.json` and `clean_report.json` are rebuilt,
 boost runs (`models.booster`), then `merge.merge_run` adds the boost plans and the rollup. Then `queue/run.json` is removed, the models
 are unloaded and the worker exits. If an end step fails, `run.json` stays and starting the worker again retries only those steps.
 Prints one JSON line `{date, processed, failed, end_steps: ok | failed | skipped, error?}`; exit is non-zero if a job or an end step failed.
 
+### one worker only
+
+The worker holds a non-blocking lock on `.worker.lock` for its whole life; a second worker exits with an error. `enqueue.py` replaces characters that cannot be written as UTF-8 (a lone surrogate) instead of failing.
+
 ### start.py
 
     python3 scripts/start.py [--port 8765]
 
 Starts `ollama serve` if Ollama does not answer, begins the run, starts the worker and the page (unless the port already answers).
-One JSON status line per component. Ctrl-C stops only what it started. When the worker exits the page and Ollama keep running.
+One JSON status line per component. Ctrl-C or SIGTERM stops only what it started. When the worker exits the page and Ollama keep running.
 
 ### jobs.json lock (scripts/jobslock.py)
 

@@ -1,4 +1,6 @@
 import io
+import os
+import signal
 import json
 import shutil
 import socket
@@ -147,6 +149,17 @@ class MainTests(unittest.TestCase):
         self.assertEqual(exited[0]["code"], 1)
         page = next(p for p in self.procs if "serve.py" in " ".join(map(str, p.cmd)))
         self.assertTrue(page.terminated)  # only at interrupt, after it kept running through the ticks
+
+    def test_sigterm_stops_what_it_started(self):
+        out = io.StringIO()
+        before = signal.getsignal(signal.SIGTERM)
+        with redirect_stdout(out):
+            code = start.main([], spawn=self.spawn, wait=lambda s: os.kill(os.getpid(), signal.SIGTERM),
+                              ollama_check=lambda: True, port_check=lambda p: False, root=self.tmp, python="py")
+        self.assertEqual(code, 0)
+        self.assertTrue(all(p.terminated for p in self.procs))
+        self.assertEqual(len(self.procs), 2)
+        self.assertEqual(signal.getsignal(signal.SIGTERM), before)  # handler restored
 
     def test_missing_venv_is_a_clear_error(self):
         with self.assertRaises(SystemExit) as ctx:
