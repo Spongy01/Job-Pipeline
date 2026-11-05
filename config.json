@@ -8,6 +8,9 @@
   "resume_path": "resume/Ali_Asgar_Resume.pdf",
   "rules": {
     "experience_years": { "min": 0, "max": 3 },
+    "exclude_us_citizenship_required": true,
+    "exclude_clearance": true,
+    "exclude_sponsorship_denied": true,
     "must_have_stacks": [],
     "avoid_stacks": [],
     "locations": [],

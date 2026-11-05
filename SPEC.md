@@ -128,3 +128,58 @@ learnable in a day, or full points when there are no gaps. The model gives exper
 `prompts/enrich/vN.py` defines VERSION, SYSTEM, USER_TEMPLATE, OUTPUT_FORMAT, the pydantic
 Output model, `score(output)` and optionally `postprocess(output)`. Released versions are
 not edited, see `prompts/enrich/CHANGELOG.md`.
+
+### jd_flags (scripts/jd_flags.py)
+
+Keyword flags computed from the description text in code, with no model. The enrich step adds
+`jd_flags` to every open job, whatever the models or the prompt version.
+
+| field | values |
+|---|---|
+| sponsorship | true (JD says it sponsors work visas, H-1B etc), false (says it does not, or cannot consider people who need it), null (not mentioned) |
+| sponsorship_evidence | the sentence that decided it, "" when null |
+| clearance | true if a security clearance (or access to classified information, a federal background investigation) is mentioned, else false |
+| clearance_evidence | first matching sentence |
+| us_citizenship_required | true for "US citizenship is required", "must be a US citizen", ITAR, export-controlled data, US persons |
+| us_citizenship_evidence | first matching sentence |
+
+A negative sponsorship sentence wins over a positive one. `false` for clearance and citizenship means
+"not found", not "confirmed absent". New phrasings are added to the pattern lists with a test.
+
+### score_breakdown.detail (prompt v2)
+
+`score_breakdown` keeps the five part scores and the reasoning. `detail` adds, per part, the maximum;
+for required_skills and preferred_skills a list of {skill, in_resume, learnable_in_a_day, weight, points}
+and whether the empty-list default was used; for learnability the gap count and how many are learnable.
+
+## filter step (scripts/filter.py)
+
+    python3 scripts/filter.py [YYYY-MM-DD] [--model qwen3.5:9b] [--input enriched.json]
+
+Reads `runs/<date>/enriched.json` and `rules` from `config.json`. Writes `runs/<date>/filtered.json` and
+`runs/<date>/filter_report.json`. Never changes config.json, jobs.json or enriched.json. It sits after the
+enrich step because the years of experience come from the enrichment models. Prints one JSON line of
+counts. Missing or corrupt input or config: non-zero exit, nothing written.
+
+Rules applied:
+
+| config rule | rejects when |
+|---|---|
+| experience_years {min, max} | the JD's required overall years start above max, or end below min. A JD that states no years passes. Preferred years and skill-specific years are ignored |
+| exclude_us_citizenship_required | jd_flags.us_citizenship_required is true |
+| exclude_clearance | jd_flags.clearance is true |
+| exclude_sponsorship_denied | jd_flags.sponsorship is false (explicitly refused). null (not mentioned) and true pass |
+
+Years come from `--model` (default qwen3.5:9b); if that model has no usable result for a job, the first
+other model with one is used. Rules in the config that are set but not applied yet (must_have_stacks,
+avoid_stacks, locations, work_models, exclude_keywords) are listed in `filter_report.json`
+under `rules_set_but_not_applied`.
+
+### filtered.json
+
+A list, one record per job in enriched.json order: `id`, `company`, `posting_name`, `stage` ("passed",
+"rejected" or "closed"), `reasons` (list of {rule, detail, evidence}, empty when passed), `years_required`
+({min, max} or null), `years_model`. Rejected jobs are kept with their reasons, not deleted.
+
+`filter_report.json` has `counts`, `rejected_by_rule`, `rules_applied`, `rules_set_but_not_applied`, and
+the list of rejected jobs with the rules that rejected them.
