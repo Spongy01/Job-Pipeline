@@ -33,20 +33,22 @@ Return the kinds that fit this job and leave the others empty. An empty list is 
 - suggested_text: the same facts in better words, using the JD's wording only where it is true. Keep every number and fact. Add no tool or result that is not already in the resume.
 - resume_location: the section, for example "Projects / Conduit".
 - jd_skills_aligned: the JD skills the new wording speaks to. why: one sentence.
-- Do not reword a line only for the sake of rewording. At most 4.
+- A rewording must actually change the wording. If nothing is worth changing, return no rewordings. At most 4.
+- Never add a tool, technology or result that is not already in current_text. The only exception is a skill that the project summaries show as built in that project; then name it in jd_skills_aligned.
 
 2. project_extensions: a gap that one of the candidate's EXISTING projects can take on, where the skill fits that project's architecture.
-- project: the exact project name from the project summaries. Read its "Not in the repo" and "Extension points" notes. Never propose something the repo already has.
+- project: the exact project name from the project summaries. Read its "Not in the repo" and "Extension points" notes. Never propose something the project's summary says it already has. If the summary does not say whether the repo has something, make the first pathway step a check of the repo.
+- jd_skills_covered: skills from the gaps list, spelled as in the list. If the gaps list says none, return no project_extensions and no new_project.
 - what_to_build: one or two sentences describing the concrete change.
-- pathway: 3 to 8 ordered steps, each with a short detail, concrete enough to start building from.
+- pathway: 3 to 8 ordered steps, each with a short detail, concrete enough to start building from. Do not number the steps.
 - effort_hours: an honest estimate. There is no size limit: a big extension is fine when that is what the gap needs.
-- resume_bullet_after_building: one bullet in the style of the resume with no invented numbers. It must start with "Write this only after you have built it: ".
+- resume_bullet_after_building: one bullet in the style of the resume with no invented numbers. It must start with "Write this only after you have built it: ". Put no numbers or percentages in it: write [your measured result] where a result would go.
 - why_it_fits: why the skill belongs in this project. At most 3 extensions. Do not force a skill into a project where it makes no sense.
 
 3. new_project: only when the extensions leave important gaps open or no existing project can sensibly hold the skills. Otherwise null.
 - name, one_liner, jd_skills_covered, why_no_existing_project_fits, effort_hours (honest estimate, no size limit), and outline: goals, main features, tech stack and milestones in a few lines. A full spec is written later from this outline.
 
-skipped_gaps: gaps you deliberately leave alone, each with a reason (for example "needs years of production experience that a project cannot show" or "unrelated to the candidate's work").
+skipped_gaps: only gaps that this plan does not address anywhere (not in a rewording, an extension or the new project), each with a one sentence reason (for example "needs years of production experience that a project cannot show"). At most 6.
 
 verdict: two sentences. The single best move for this job and why."""
 
@@ -123,6 +125,8 @@ SYSTEM_ROLLUP = """\
 You are a careful career coach for one software engineer. You get their resume, summaries of their GitHub projects, and a tally of the skills that job descriptions asked for in one day while the resume did not clearly show them. For each skill you see how many of the day's jobs mention it. You return one JSON object with a summary and ONE general project that closes as many of the most common gaps as sensibly fit together.
 
 """ + TRUTH_RULES + """
+- Skills marked "already in your repos ... but not on the resume" are not gaps to build. Do not put them in the project: they are listed separately for the candidate to add to the resume.
+- Read the project summaries before proposing an extension. Never propose something that a project's summary says it already has.
 - summary: two sentences about the pattern in the gaps (what keeps coming up and what is mostly learnable quickly).
 - general_project.kind is "extension" when one existing project (name it exactly in "project") can take the skills on, otherwise "new". Choose "extension" when it makes architectural sense. Never combine unrelated skills into one project just to cover more of them: leave the rest out.
 - name, one_liner, jd_skills_covered (use the skill names from the tally), why, effort_hours (honest estimate, no size limit), outline (goals, main features, stack and milestones in a few lines)."""

@@ -95,16 +95,16 @@ class GapTests(unittest.TestCase):
     def test_consolidate_gaps_merges_models_and_flags_single_model(self):
         j = job("1", enrichment={
             M9: result(required=[skill("Kubernetes", "no", True), skill("Python", "yes"),
-                                 skill("AWS", "similar", True)], preferred=[skill("Terraform", "no", False)]),
+                                 skill("Docker", "similar", True)], preferred=[skill("Terraform", "no", False)]),
             MG: result(required=[skill("kubernetes", "similar", False), skill("Python", "yes"),
-                                 skill("AWS", "yes")])})
+                                 skill("Docker", "yes")])})
         gaps = {bd.skill_key(g["skill"]): g for g in bd.consolidate_gaps(j)}
-        self.assertEqual(sorted(gaps), ["aws", "kubernetes", "terraform"])
+        self.assertEqual(sorted(gaps), ["docker", "kubernetes", "terraform"])
         k = gaps["kubernetes"]
         self.assertEqual((k["kind"], k["status"], k["flagged_by"], k["models_total"], k["learnable_votes"], k["single_model"]),
                          ("required", "no", [MG, M9], 2, 1, False))
         self.assertEqual(k["skill"], "Kubernetes")  # first model's wording
-        a = gaps["aws"]
+        a = gaps["docker"]
         self.assertTrue(a["single_model"])
         self.assertEqual((a["status"], a["flagged_by"]), ("similar", [M9]))
         self.assertEqual(gaps["terraform"]["kind"], "preferred")
@@ -118,17 +118,24 @@ class GapTests(unittest.TestCase):
 
 class TallyTests(unittest.TestCase):
     def test_tally_counts_jobs_per_skill_case_insensitively(self):
-        jobs = [job("1", enrichment={M9: result(required=[skill("AWS", "no", True)])}),
-                job("2", enrichment={M9: result(required=[skill("aws", "similar", False)])}),
-                job("3", enrichment={M9: result(preferred=[skill("Aws (any one)", "no", True)])}),
+        jobs = [job("1", enrichment={M9: result(required=[skill("Redis", "no", True)])}),
+                job("2", enrichment={M9: result(required=[skill("redis", "similar", False)])}),
+                job("3", enrichment={M9: result(preferred=[skill("Redis (any one)", "no", True)])}),
                 job("4", enrichment={M9: result(required=[skill("Go", "no", False)])})]
         rows = bd.tally_gaps(jobs)
-        aws = rows[0]
-        self.assertEqual((aws["jobs"], aws["job_ids"], aws["required_count"], aws["preferred_count"]),
+        redis = rows[0]
+        self.assertEqual((redis["jobs"], redis["job_ids"], redis["required_count"], redis["preferred_count"]),
                          (3, ["1", "2", "3"], 2, 1))
-        self.assertEqual(aws["skill"], "AWS")  # most common display name, ties to the first seen
-        self.assertAlmostEqual(aws["learnable_share"], 2 / 3)
-        self.assertEqual(aws["models_flagged_max"], 1)
+        self.assertEqual(redis["skill"], "Redis")  # most common display name, ties to the first seen
+        self.assertAlmostEqual(redis["learnable_share"], 2 / 3)
+        self.assertEqual(redis["models_flagged_max"], 1)
+
+    def test_cloud_variants_are_one_row(self):
+        names = ["AWS/GCP/Azure (any one)", "Azure", "cloud platforms (AWS, GCP, or Azure)", "cloud infrastructure"]
+        jobs = [job(str(i), enrichment={M9: result(required=[skill(n, "no", True)])}) for i, n in enumerate(names)]
+        rows = bd.tally_gaps(jobs)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual((rows[0]["skill"], rows[0]["jobs"]), (bd.CLOUD_DISPLAY, 4))
 
     def test_tally_sort_order(self):
         jobs = [job("1", enrichment={M9: result(required=[skill("Zed", "no"), skill("Alpha", "no")])}),
@@ -214,6 +221,160 @@ class FormatTests(unittest.TestCase):
         self.assertEqual(len(text.splitlines()), 5)
         self.assertIn("- S0: 30 jobs (1 required, 0 preferred)", text)
         self.assertIn("50%", text)
+
+
+PROJECTS_MD = """# Project summaries
+
+Projects: Conduit | BrokeNoMore | Cardiology-QA
+
+## 1. Conduit (resume project)
+
+**Stack.** Python, FastAPI, Redis, Docker, TypeScript dashboards.
+
+**Not in the repo.** No Kubernetes, no Terraform. No GCP deployment.
+
+## 2. BrokeNoMore (resume project)
+
+**Stack.** FastAPI, Next.js 14 with TypeScript, SQLite.
+
+**Not in the repo.** No Docker.
+
+## 3. Cardiology-QA, "Cardiology LLM Fine-Tuning" (resume project)
+
+**What it is.** QLoRA fine-tuning with PyTorch.
+
+## Other repos (shorter)
+
+- **sundial** (TypeScript, pushed 2026-10-07). Browser extension, IndexedDB.
+- **miniGPT** (Jupyter). A transformer from scratch in PyTorch.
+"""
+
+
+class RepoMentionTests(unittest.TestCase):
+    def test_index_skips_not_in_the_repo_and_splits_other_repos(self):
+        index = bd.projects_index(PROJECTS_MD)
+        self.assertEqual(sorted(index), ["BrokeNoMore", "Cardiology-QA", "Conduit", "miniGPT", "sundial"])
+        self.assertNotIn("kubernetes", " ".join(index["Conduit"]).lower())
+        self.assertNotIn("docker", " ".join(index["BrokeNoMore"]).lower())
+
+    def test_repo_mentions(self):
+        index = bd.projects_index(PROJECTS_MD)
+        self.assertEqual(bd.repo_mentions("TypeScript", index), ["Conduit", "BrokeNoMore", "sundial"])
+        self.assertEqual(bd.repo_mentions("Kubernetes", index), [])  # only named under "Not in the repo"
+        self.assertEqual(bd.repo_mentions("Java", index), [])  # no substring matches inside other words
+        self.assertEqual(bd.repo_mentions("PyTorch", index), ["Cardiology-QA", "miniGPT"])
+        self.assertEqual(bd.repo_mentions("Go", index), [])  # too short to match safely
+
+    def test_annotate_repos_marks_in_repos_and_on_resume(self):
+        rows = [{"skill": "TypeScript", "jobs": 4}, {"skill": "Kubernetes", "jobs": 2}, {"skill": "Docker", "jobs": 1}]
+        out = bd.annotate_repos(rows, PROJECTS_MD, "Skills: Python, Docker")
+        by = {r["skill"]: r for r in out}
+        self.assertEqual((by["TypeScript"]["in_repos"], by["TypeScript"]["on_resume"]), (["Conduit", "BrokeNoMore", "sundial"], False))
+        self.assertEqual(by["Kubernetes"]["in_repos"], [])
+        self.assertTrue(by["Docker"]["on_resume"])
+        self.assertNotIn("in_repos", rows[0])  # input untouched
+
+    def test_cloud_row_looks_for_the_individual_providers(self):
+        md = "## 1. Conduit\n\n**Stack.** deployed on GCP.\n"
+        out = bd.annotate_repos([{"skill": bd.CLOUD_DISPLAY, "jobs": 3}], md, "")
+        self.assertEqual(out[0]["in_repos"], ["Conduit"])
+
+    def test_format_tally_mentions_repos(self):
+        rows = [{"skill": "TypeScript", "jobs": 4, "models_flagged_max": 2, "learnable_share": 1.0, "required_count": 4,
+                 "preferred_count": 0, "in_repos": ["sundial"], "on_resume": False}]
+        self.assertIn("already in your repos (sundial) but not on the resume", bd.format_tally(rows))
+
+
+class CleanPlanTests(unittest.TestCase):
+    def base(self):
+        return {"verdict": "v",
+                "rewordings": [{"current_text": "Built X.", "suggested_text": "Built X.", "jd_skills_aligned": []},
+                               {"current_text": "Built Y.", "suggested_text": "Built Y well.", "jd_skills_aligned": []}],
+                "project_extensions": [
+                    {"project": "Conduit", "jd_skills_covered": ["Kubernetes"],
+                     "pathway": [{"step": "1 - Write manifests", "detail": ""}, {"step": "2. Deploy", "detail": "d"},
+                                 {"step": "Test it", "detail": ""}],
+                     "resume_bullet_after_building": "Deployed on Kubernetes."}],
+                "new_project": None,
+                "skipped_gaps": [{"skill": "Kubernetes", "reason": "covered"}, {"skill": "Go", "reason": "unrelated"}]}
+
+    def gaps(self, *names):
+        return [{"skill": n} for n in names]
+
+    def test_drops_no_op_rewordings(self):
+        out = bd.clean_plan(self.base())
+        self.assertEqual([r["suggested_text"] for r in out["rewordings"]], ["Built Y well."])
+
+    def test_strips_pathway_numbering(self):
+        out = bd.clean_plan(self.base())
+        self.assertEqual([s["step"] for s in out["project_extensions"][0]["pathway"]], ["Write manifests", "Deploy", "Test it"])
+
+    def test_enforces_bullet_prefix_once(self):
+        out = bd.clean_plan(self.base())
+        bullet = out["project_extensions"][0]["resume_bullet_after_building"]
+        self.assertEqual(bullet, bd.BULLET_PREFIX + "Deployed on Kubernetes.")
+        again = bd.clean_plan(out)
+        self.assertEqual(again["project_extensions"][0]["resume_bullet_after_building"], bullet)
+
+    def test_empty_bullet_stays_empty(self):
+        plan = self.base()
+        plan["project_extensions"][0]["resume_bullet_after_building"] = ""
+        out = bd.clean_plan(plan)
+        self.assertEqual(out["project_extensions"][0]["resume_bullet_after_building"], "")
+
+    def test_skipped_gaps_covered_by_the_plan_are_removed(self):
+        out = bd.clean_plan(self.base())
+        self.assertEqual([g["skill"] for g in out["skipped_gaps"]], ["Go"])
+
+    def test_input_not_modified(self):
+        plan = self.base()
+        bd.clean_plan(plan)
+        self.assertEqual(len(plan["rewordings"]), 2)
+
+
+class ExtraCheckTests(unittest.TestCase):
+    RESUME = "Built Y with Redis. Reached 100 RPS."
+    PROJECTS = "## 1. Conduit\n\n**Stack.** FastAPI and Pydantic models.\n"
+
+    def check(self, plan, gaps=("Kubernetes",)):
+        return bd.check_plan(plan, self.RESUME, ["Conduit"], gaps=[{"skill": g} for g in gaps], projects_md=self.PROJECTS)
+
+    def test_extension_covering_no_listed_gap_is_flagged(self):
+        plan = {"rewordings": [], "project_extensions": [{"project": "Conduit", "jd_skills_covered": ["AI tools"]}]}
+        checked, warnings = self.check(plan)
+        self.assertFalse(checked["project_extensions"][0]["covers_gap"])
+        self.assertTrue(any("none of the listed gaps" in w for w in warnings))
+
+    def test_extension_covering_a_gap_passes_with_loose_names(self):
+        plan = {"rewordings": [], "project_extensions": [{"project": "Conduit", "jd_skills_covered": ["kubernetes (k8s)"]}]}
+        checked, warnings = self.check(plan)
+        self.assertTrue(checked["project_extensions"][0]["covers_gap"])
+        self.assertEqual(warnings, [])
+
+    def test_no_gaps_means_every_extension_is_flagged(self):
+        plan = {"rewordings": [], "project_extensions": [{"project": "Conduit", "jd_skills_covered": ["Kubernetes"]}]}
+        checked, _ = self.check(plan, gaps=())
+        self.assertFalse(checked["project_extensions"][0]["covers_gap"])
+
+    def test_invented_number_in_bullet_is_flagged(self):
+        plan = {"rewordings": [], "project_extensions": [{"project": "Conduit", "jd_skills_covered": ["Kubernetes"],
+                "resume_bullet_after_building": "Cut latency by 30% at 100 RPS."}]}
+        _, warnings = self.check(plan)
+        self.assertTrue(any("30%" in w for w in warnings))
+        self.assertFalse(any("100" in w for w in warnings))  # 100 is on the resume
+
+    def test_reword_adding_a_term_from_nowhere_is_flagged_repo_term_is_noted(self):
+        plan = {"rewordings": [
+            {"current_text": "Built Y with Redis.", "suggested_text": "Built Y with Redis and Kafka.", "jd_skills_aligned": ["Kafka"]},
+            {"current_text": "Built Y with Redis.", "suggested_text": "Built Y with Redis and Pydantic.", "jd_skills_aligned": ["Pydantic"]},
+            {"current_text": "Built Y with Redis.", "suggested_text": "Built Y with Redis, well.", "jd_skills_aligned": ["Redis"]}],
+            "project_extensions": []}
+        checked, warnings = self.check(plan)
+        self.assertEqual(len(warnings), 1)  # only Kafka: Pydantic is in the repo summary, Redis was already there
+        r = checked["rewordings"]
+        self.assertEqual(r[0]["adds_unsupported"], ["Kafka"])
+        self.assertEqual(r[1]["adds_from_repo"], ["Pydantic"])
+        self.assertEqual((r[2]["adds_unsupported"], r[2]["adds_from_repo"]), ([], []))
 
 
 if __name__ == "__main__":

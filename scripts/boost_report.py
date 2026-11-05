@@ -23,11 +23,18 @@ def _rollup_section(rollup):
         lines += [rollup["summary"], ""]
     tally = rollup.get("tally") or []
     if tally:
-        lines += ["| Skill | Jobs | Models | Learnable in a day |", "|---|---|---|---|"]
+        lines += ["| Skill | Jobs | Models | Learnable in a day | In your repos |", "|---|---|---|---|---|"]
         for row in tally[:15]:
-            lines.append("| %s | %d | %d | %d%% |" % (row["skill"], row["jobs"], row["models_flagged_max"],
-                                                       round(row["learnable_share"] * 100)))
+            lines.append("| %s | %d | %d | %d%% | %s |" % (
+                row["skill"], row["jobs"], row["models_flagged_max"], round(row["learnable_share"] * 100),
+                ", ".join(row.get("in_repos") or []) or "no"))
         lines.append("")
+        add = [r for r in tally if r.get("in_repos") and not r.get("on_resume")]
+        if add:
+            lines += ["### Already in your repos, not on your resume", "",
+                      "These need no new project. Check them against the repo and add them to the Technical Skills line.", ""]
+            lines += ["- %s: asked for in %d job(s); shown in %s" % (r["skill"], r["jobs"], ", ".join(r["in_repos"])) for r in add]
+            lines.append("")
     else:
         lines += ["No missing skills were found across the day's jobs.", ""]
     gp = rollup.get("general_project")

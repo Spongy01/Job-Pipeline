@@ -26,7 +26,10 @@ def record(rank=1, ok=True, **over):
 
 
 ROLLUP = {"ok": True, "summary": "Cloud keeps coming up.",
-          "tally": [{"skill": "AWS", "jobs": 5, "models_flagged_max": 2, "learnable_share": 0.5, "job_ids": []}],
+          "tally": [{"skill": "AWS", "jobs": 5, "models_flagged_max": 2, "learnable_share": 0.5, "job_ids": [],
+                     "in_repos": [], "on_resume": False},
+                    {"skill": "TypeScript", "jobs": 4, "models_flagged_max": 3, "learnable_share": 1.0, "job_ids": [],
+                     "in_repos": ["sundial", "BrokeNoMore"], "on_resume": False}],
           "general_project": {"kind": "new", "name": "Cloud Gateway", "one_liner": "o", "jd_skills_covered": ["AWS"],
                               "why": "w", "effort_hours": 40, "project": ""},
           "spec_file": "boost/specs/rollup-cloud-gateway.md", "warnings": ["Project not found in projects.md: 'X'"]}
@@ -36,13 +39,19 @@ class ReportTests(unittest.TestCase):
     def test_sections_in_order(self):
         text = br.render_report("2026-11-04", ROLLUP, [record(1), record(2)], ["a note"])
         order = [text.index(s) for s in ("# Boost report, 2026-11-04", "a note", "## Across today's jobs",
-                                         "| AWS | 5 |", "### General project: Cloud Gateway", "## 1. Acme1, Engineer",
+                                         "| AWS | 5 |", "### Already in your repos, not on your resume", "### General project: Cloud Gateway", "## 1. Acme1, Engineer",
                                          "### Rewordings", "### Extend an existing project", "### Skipped gaps",
                                          "## 2. Acme2, Engineer")]
         self.assertEqual(order, sorted(order))
         self.assertIn("Spec: `boost/specs/rollup-cloud-gateway.md`", text)
         self.assertIn("1. Write workflow - run pytest", text)
         self.assertIn("https://x/1", text)
+
+    def test_repo_skills_are_listed_for_the_resume(self):
+        text = br.render_report("d", ROLLUP, [], [])
+        self.assertIn("- TypeScript: asked for in 4 job(s); shown in sundial, BrokeNoMore", text)
+        self.assertIn("| TypeScript | 4 | 3 | 100% | sundial, BrokeNoMore |", text)
+        self.assertIn("| AWS | 5 | 2 | 50% | no |", text)
 
     def test_warnings_listed(self):
         text = br.render_report("d", ROLLUP, [record(1, warnings=["Reworded text not found in the resume: 'z'"])], [])

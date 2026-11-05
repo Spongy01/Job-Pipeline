@@ -78,6 +78,8 @@ class TemplateTests(unittest.TestCase):
         self.assertIn("word for word", plan_prompt)
         self.assertIn("never invent", plan_prompt)
         self.assertIn("em dash", plan_prompt)
+        self.assertIn("[your measured result]", p.SYSTEM_PLAN)
+        self.assertIn("already in your repos", p.SYSTEM_ROLLUP)
         self.assertIn("never invent", p.SYSTEM_ROLLUP.lower())
         self.assertIn("never invent", p.SYSTEM_SPEC.lower())
 

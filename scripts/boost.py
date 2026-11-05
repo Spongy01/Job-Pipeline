@@ -132,7 +132,9 @@ def plan_job(ctx, selected):
     if plan is None:
         record.update({"ok": False, "error": error})
         return record, None
-    checked, warnings = bd.check_plan(bd.strip_em_dashes(plan.model_dump()), ctx.resume_text, ctx.project_names)
+    cleaned = bd.clean_plan(bd.strip_em_dashes(plan.model_dump()))
+    checked, warnings = bd.check_plan(cleaned, ctx.resume_text, ctx.project_names, gaps=gaps,
+                                      projects_md=ctx.projects_md)
     spec_text = None
     if checked.get("new_project"):
         np_ = checked["new_project"]
@@ -248,7 +250,7 @@ def run(root, run_date, top_n=None, model=None, prompt_version="v1", force=False
             records.append(record)
 
         rollup_path = run_dir / "boost_rollup.json"
-        tally = bd.tally_gaps(passed)
+        tally = bd.annotate_repos(bd.tally_gaps(passed), projects_md, resume_text)
         tally_hash = hashlib.sha1(json.dumps(tally, sort_keys=True).encode("utf-8")).hexdigest()
         rollup = reusable(rollup_path, prompt.VERSION, force)
         if rollup and rollup.get("tally_hash") == tally_hash:
