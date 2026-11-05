@@ -34,7 +34,8 @@ Boost reads files already produced by earlier steps and writes new files. It nev
      Claude Code.
 2. A daily rollup across all jobs that passed the filter: a count of every missing skill (how many jobs
    mention it), and one general project or project upgrade that covers the most common gaps.
-3. Every suggestion that needs new work says so, with a rough effort estimate in hours.
+3. Every suggestion that needs new work says so, with a rough effort estimate in hours. The estimate is
+   information only: there is no time limit and no cap on project size.
 
 ## Non-goals
 
@@ -53,7 +54,7 @@ Boost reads files already produced by earlier steps and writes new files. It nev
 - **Generic advice** ("learn AWS") with no link to a specific project or resume line.
 - **Suggestions that do not fit the project**, for example adding Kubernetes to a project that is a
   single script, or adding RAG to a project where it has no purpose.
-- **Unrealistic scope.** A weekend sized gap answered with a three month project.
+- **Padding.** A small gap answered with a needlessly big project. Size follows the gap, not a time limit.
 - Em dashes in any text meant to be copied into a job portal or resume (project rule in CLAUDE.md).
 
 ## Inputs
@@ -94,9 +95,8 @@ All paths relative to the project root.
 4. **Two calls per plan.** Call A returns a structured plan (JSON). Call B, only if the plan contains a new
    project, returns the spec document as Markdown. This keeps the structured reply short for a 9B model.
    The rollup's general project gets its spec the same way.
-5. **Effort scale.** Suggestions are sized in hours and the default is weekend sized: project extensions
-   up to about 16 hours, new projects up to about 40 hours. The author has not said how much time they have;
-   this is the open question below.
+5. **Effort.** No time limits. Suggestions can be as big as the gap needs. Each one still carries a rough
+   effort estimate in hours (and for big projects a split into milestones), so the author can judge it.
 6. **Checks in code.** The model's plan is checked against the files, in the same spirit as `evidence_found`
    in enrichment: a rewording's `current_text` must appear in the resume text, and a project extension must
    name a project that exists in `resume/projects.md`. A failed check does not drop the suggestion; it sets a
@@ -132,7 +132,7 @@ version are kept unless `--force`.
   `pathway[]` (ordered steps with a short detail), `effort_hours`, `resume_bullet_after_building`.
 - `new_project` (or null): `name`, `one_liner`, `jd_skills_covered`, `why_no_existing_project_fits`,
   `effort_hours`, outline for the spec.
-- `skipped_gaps[]`: `skill`, `reason` (for example "needs production experience, not a weekend task").
+- `skipped_gaps[]`: `skill`, `reason` (for example "needs years of production experience that a project cannot show").
 
 The model may return any subset. It returns a new project only when the project extensions leave important
 gaps open.
@@ -170,10 +170,7 @@ gaps open.
 
 Running the step on `runs/2026-11-04` produces five plans and a rollup that the author can read in one
 sitting and judge as: truthful against their resume and repos, specific to each JD, sensible for the named
-project, and sized for the time they have. Code level success: all tests pass, a rerun changes nothing, and a
+project, and honestly sized. Code level success: all tests pass, a rerun changes nothing, and a
 corrupt or missing input fails loudly without writing partial files.
 
-## Open question for the author
-
-How many hours can you realistically put into one project suggestion: a weekend (about 16 hours), a week
-(about 40), or more? The effort caps above are set from this.
+No open questions.
