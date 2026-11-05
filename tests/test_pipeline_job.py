@@ -129,6 +129,16 @@ class ProcessTests(PipelineTestCase):
         with self.assertRaises(pipeline_job.PipelineError):
             self.pipe().process(job)
 
+    def test_discard_removes_partial_entries_from_run_files(self):
+        self.pipe().process(raw_job("100"))
+        self.results[MG] = RuntimeError("down")
+        p = self.pipe()
+        with self.assertRaises(RuntimeError):
+            p.process(raw_job("200"))
+        p.discard("200")
+        for name in ("clean.json", "enriched.json", "filtered.json"):
+            self.assertEqual([j["id"] for j in self.run_file(name)], ["100"])
+
     def test_corrupt_run_file_raises_and_is_not_replaced(self):
         (self.tmp / "runs" / DATE).mkdir(parents=True)
         (self.tmp / "runs" / DATE / "clean.json").write_text("[{corrupt")

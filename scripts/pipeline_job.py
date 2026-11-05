@@ -92,3 +92,13 @@ class JobPipeline:
         _upsert(self.run_dir / "filtered.json", decision)
         merged = merge_one(self.root, self.run_date, entry, decision)
         return {"id": job_id, "stage": decision["stage"], "merge": merged}
+
+    def discard(self, job_id):
+        """Drop a job that failed for good from the run files, so the final merge does not take
+        in a half-processed record. Files that do not exist or do not hold the job are left alone."""
+        for name in ("clean.json", "enriched.json", "filtered.json"):
+            path = self.run_dir / name
+            entries = _read_list(path)
+            kept = [e for e in entries if str(e.get("id")) != str(job_id)]
+            if len(kept) != len(entries):
+                write_json_atomic(path, kept)
