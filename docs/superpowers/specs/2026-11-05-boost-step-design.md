@@ -67,8 +67,8 @@ All paths relative to the project root.
 - The resume text from the PDF at `config.json` `resume_path` (same extraction as the enrich step).
 - `resume/projects.md`: verified summaries of the author's GitHub projects, including what each repo does
   not have and the analysis of natural extension points. This is the source of truth about the projects.
-- `config.json`: an optional `boost` block, `{"top_n": 5, "model": "qwen3.5:9b"}`. Defaults apply when it
-  is missing. The author edits config.json; the script never writes to it.
+- `config.json`: `models.booster` (the model name, default qwen3.5:9b) and an optional `boost` block,
+  `{"top_n": 5}`. Defaults apply when they are missing. The author edits config.json; the script never writes to it.
 
 ## Decisions made with the author
 

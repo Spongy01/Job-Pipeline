@@ -24,6 +24,27 @@ def load_prompt(version, root, area):
     return module
 
 
+def models_from_config(config):
+    """(enricher models, booster model) from config.json "models". Missing values give ([], None).
+
+    "enricher" is a model name or a list of names (every one is run and stored side by side);
+    "booster" is one model name (the stronger model the boost step uses and ranks with).
+    """
+    section = config.get("models")
+    if section is None:
+        return [], None
+    if not isinstance(section, dict):
+        raise LLMError('config.json "models" must be an object like {"enricher": [...], "booster": "..."}')
+    enricher = section.get("enricher")
+    names = [] if enricher is None else [enricher] if isinstance(enricher, str) else enricher
+    if not isinstance(names, list) or any(not isinstance(n, str) or not n.strip() for n in names):
+        raise LLMError('config.json models.enricher must be a model name or a list of model names')
+    booster = section.get("booster")
+    if booster is not None and (not isinstance(booster, str) or not booster.strip()):
+        raise LLMError("config.json models.booster must be a model name")
+    return list(dict.fromkeys(n.strip() for n in names)), (booster.strip() if booster else None)
+
+
 def call_model(client, model, messages, num_ctx, think):
     kwargs = dict(model=model, messages=messages,
                   options={"temperature": 0, "num_ctx": num_ctx}, think=think)

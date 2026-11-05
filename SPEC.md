@@ -77,9 +77,13 @@ Jobs missing any are dropped and reported. For duplicate ids the first is kept.
 Needs the venv: `python3 -m venv .venv && .venv/bin/pip install -r requirements.txt`
 (ollama, pypdf). Ollama must be running (`ollama serve`) with the models downloaded.
 
-    .venv/bin/python scripts/enrich.py [YYYY-MM-DD] --models M1 [M2 ...]
+    .venv/bin/python scripts/enrich.py [YYYY-MM-DD] [--models M1 [M2 ...]]
         [--limit N] [--prompt-version v1] [--input clean.json] [--out-dir DIR]
         [--force] [--num-ctx 8192] [--retries 1] [--think]
+
+Models: `--models`, or else `models.enricher` in `config.json` (a model name or a list; every model is run and stored
+side by side). The boost step uses `models.booster` (one model, default qwen3.5:9b; `--model` overrides). A bad value in
+`config.json` is an error; the scripts never write to `config.json`.
 
 Reads `runs/<date>/clean.json`, the resume text from `config.json` `resume_path` (PDF, via
 pypdf), and the prompt `prompts/enrich/<version>.py`. Writes `runs/<date>/enriched.json`

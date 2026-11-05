@@ -72,6 +72,27 @@ class GenerateJsonTests(unittest.TestCase):
         self.assertNotIn("think", client.calls[1])
 
 
+class ModelsFromConfigTests(unittest.TestCase):
+    def test_missing_section_gives_nothing(self):
+        self.assertEqual(llm.models_from_config({}), ([], None))
+        self.assertEqual(llm.models_from_config({"models": {}}), ([], None))
+        self.assertEqual(llm.models_from_config({"models": None}), ([], None))
+
+    def test_enricher_string_or_list_and_booster(self):
+        self.assertEqual(llm.models_from_config({"models": {"enricher": "a:1", "booster": "b:2"}}), (["a:1"], "b:2"))
+        self.assertEqual(llm.models_from_config({"models": {"enricher": ["a:1", "c:3"]}}), (["a:1", "c:3"], None))
+
+    def test_duplicates_are_removed_keeping_order(self):
+        self.assertEqual(llm.models_from_config({"models": {"enricher": ["a", "b", "a"]}})[0], ["a", "b"])
+
+    def test_bad_values_raise(self):
+        for bad in ({"models": []}, {"models": {"enricher": 5}}, {"models": {"enricher": [""]}},
+                    {"models": {"enricher": ["a", 3]}}, {"models": {"booster": ""}}, {"models": {"booster": ["x"]}},
+                    {"models": {"enricher": "  "}}):
+            with self.assertRaises(llm.LLMError, msg=str(bad)):
+                llm.models_from_config(bad)
+
+
 class OtherHelperTests(unittest.TestCase):
     def test_generate_text_returns_raw_reply(self):
         self.assertEqual(llm.generate_text(FakeClient(["# Spec\ntext"]), "m", MESSAGES, 4096, False), "# Spec\ntext")

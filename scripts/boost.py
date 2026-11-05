@@ -5,8 +5,8 @@ The boost step. After enrich and filter, takes the best jobs of the day and writ
 local Ollama model, a plan for each (rewordings, project extensions, a new project with a spec)
 plus a daily rollup of the skills that keep coming up as missing.
 
-Reads  runs/<date>/filtered.json, runs/<date>/enriched.json, config.json (resume_path and an
-       optional "boost" block {"top_n": 5, "model": "qwen3.5:9b"}), resume/projects.md.
+Reads  runs/<date>/filtered.json, runs/<date>/enriched.json, config.json (resume_path, "models":
+       {"booster": ...} and an optional "boost" block {"top_n": 5}), resume/projects.md.
 Writes runs/<date>/boost/<job_id>.json, runs/<date>/boost/specs/*.md,
        runs/<date>/boost_rollup.json, runs/<date>/boost.md.
 Never changes any input file. Prints one JSON line of counts; progress goes to stderr.
@@ -15,7 +15,7 @@ plan or the rollup failed.
 
 Options:
   --top-n N            jobs to plan (default: config boost.top_n, else 5)
-  --model M            Ollama model (default: config boost.model, else qwen3.5:9b)
+  --model M            Ollama model (default: config models.booster, else qwen3.5:9b)
   --prompt-version V   prompts/boost/<V>.py (default v1)
   --force              redo plans and the rollup that already exist for this prompt version
   --num-ctx N          context window (default 16384)
@@ -40,7 +40,7 @@ import boost_report  # noqa: E402
 from clean import write_json_atomic  # noqa: E402
 from enrich import load_resume_text  # noqa: E402
 from llm import (LLMError, check_models, extract_json, generate_json, generate_text,  # noqa: E402
-                 load_prompt, unload_model)
+                 load_prompt, models_from_config, unload_model)
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_MODEL = "qwen3.5:9b"
@@ -205,7 +205,7 @@ def run(root, run_date, top_n=None, model=None, prompt_version="v1", force=False
     config = load_json(root / "config.json", "config.json")
     boost_cfg = config.get("boost") or {}
     top_n = top_n or boost_cfg.get("top_n") or DEFAULT_TOP_N
-    model = model or boost_cfg.get("model") or DEFAULT_MODEL
+    model = model or models_from_config(config)[1] or DEFAULT_MODEL
     filtered = load_json(run_dir / "filtered.json", "filtered.json")
     enriched = load_json(run_dir / "enriched.json", "enriched.json")
     if not isinstance(filtered, list) or not isinstance(enriched, list):

@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Usage: .venv/bin/python scripts/enrich.py [YYYY-MM-DD] --models M1 [M2 ...] [options]
+"""Usage: .venv/bin/python scripts/enrich.py [YYYY-MM-DD] [--models M1 [M2 ...]] [options]
 
 Reads runs/<date>/clean.json, asks each local Ollama model to extract a summary,
 experience, required/preferred skills (checked against the resume) and a rubric
 score for every job, and stores the results in runs/<date>/enriched.json.
+
+Models come from --models, or else from "models": {"enricher": ...} in config.json (a name or a list).
 
 Options:
   --limit N            only the first N jobs
@@ -34,7 +36,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from clean import write_json_atomic  # noqa: E402
 from jd_flags import detect as detect_jd_flags  # noqa: E402
 from llm import (LLMError, call_model, check_models, extract_json, generate_json,  # noqa: E402,F401
-                 load_prompt as _load_prompt, unload_model)
+                 load_prompt as _load_prompt, models_from_config, unload_model)
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_NUM_CTX = 8192
@@ -63,6 +65,16 @@ def load_resume_text(pdf_path):
     if not text:
         raise EnrichError("no text could be extracted from %s" % pdf_path)
     return text
+
+
+def resolve_models(cli_models, root=ROOT):
+    """--models if given, else models.enricher from config.json."""
+    if cli_models:
+        return cli_models
+    names, _ = models_from_config(load_json(Path(root) / "config.json", "config.json"))
+    if not names:
+        raise EnrichError('no models: pass --models, or set "models": {"enricher": [...]} in config.json')
+    return names
 
 
 def load_json(path, what):
@@ -191,7 +203,7 @@ def run(root, run_date, models, limit=None, prompt_version="v1", input_name="cle
 def main(argv):
     p = argparse.ArgumentParser(description="Enrich jobs with local Ollama models.")
     p.add_argument("date", nargs="?", default=date.today().isoformat())
-    p.add_argument("--models", nargs="+", required=True)
+    p.add_argument("--models", nargs="+", help='default: models.enricher in config.json')
     p.add_argument("--limit", type=int)
     p.add_argument("--prompt-version", default="v1")
     p.add_argument("--input", default="clean.json")
@@ -207,7 +219,7 @@ def main(argv):
     except ValueError:
         p.error("date must be YYYY-MM-DD")
     try:
-        summary = run(ROOT, args.date, args.models, limit=args.limit, prompt_version=args.prompt_version,
+        summary = run(ROOT, args.date, resolve_models(args.models), limit=args.limit, prompt_version=args.prompt_version,
                       input_name=args.input, out_dir=args.out_dir, force=args.force,
                       num_ctx=args.num_ctx, retries=args.retries, think=args.think,
                       unload=not args.keep_loaded,

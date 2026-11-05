@@ -6,6 +6,10 @@
         "pages": 1 }
   ],
   "resume_path": "resume/Ali_Asgar_Resume.pdf",
+  "models": {
+    "enricher": ["gemma4:e4b", "qwen3.5:9b"],
+    "booster": "qwen3.5:9b"
+  },
   "rules": {
     "experience_years": { "min": 0, "max": 3 },
     "exclude_us_citizenship_required": true,

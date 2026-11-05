@@ -274,6 +274,36 @@ class RunTests(BoostTestCase):
         self.assertEqual(boost.run(self.tmp, DATE, client=FakeClient(), resume_text=RESUME)["selected"], 2)
         self.assertEqual(boost.run(self.tmp, DATE, top_n=4, client=FakeClient(), resume_text=RESUME)["selected"], 4)
 
+    def write_config(self, data):
+        (self.tmp / "config.json").write_text(json.dumps({"resume_path": "x", **data}))
+
+    def test_booster_model_comes_from_config(self):
+        self.setup_jobs([make_job("1", models=("other:1",))])
+        self.write_config({"models": {"booster": "other:1"}})
+        client = FakeClient(models=("other:1",))
+        summary = boost.run(self.tmp, DATE, client=client, resume_text=RESUME)
+        self.assertEqual(summary["model"], "other:1")
+        self.assertEqual({c["model"] for c in client.calls}, {"other:1"})
+        self.assertEqual(client.unloaded, ["other:1"])
+        self.assertEqual(self.plan_file("1")["score_model"], "other:1")
+
+    def test_command_line_model_beats_config_and_default_applies_without_either(self):
+        self.setup_jobs([make_job("1")])
+        self.write_config({"models": {"booster": "other:1"}})
+        client = FakeClient(models=(M9, "other:1"))
+        self.assertEqual(boost.run(self.tmp, DATE, model=M9, client=client, resume_text=RESUME)["model"], M9)
+        self.write_config({})
+        shutil.rmtree(self.run_dir / "boost")
+        (self.run_dir / "boost_rollup.json").unlink()
+        self.assertEqual(boost.run(self.tmp, DATE, client=FakeClient(), resume_text=RESUME)["model"], M9)
+
+    def test_bad_models_section_is_an_error_and_writes_nothing(self):
+        self.setup_jobs([make_job("1")])
+        self.write_config({"models": {"booster": 7}})
+        with self.assertRaises(llm.LLMError):
+            self.go()
+        self.assertFalse((self.run_dir / "boost.md").exists())
+
     def test_unloads_model_and_keep_loaded(self):
         self.setup_jobs([make_job("1")])
         self.go()

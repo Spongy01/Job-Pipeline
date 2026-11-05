@@ -57,6 +57,41 @@ def make_job(i="1", **over):
     return job
 
 
+class ResolveModelsTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+
+    def config(self, data):
+        (self.tmp / "config.json").write_text(data if isinstance(data, str) else json.dumps(data))
+
+    def test_command_line_wins_and_config_is_not_read(self):
+        self.assertEqual(enrich.resolve_models(["x:1"], self.tmp), ["x:1"])  # no config.json at all
+
+    def test_config_enricher_used_when_no_models_given(self):
+        self.config({"models": {"enricher": ["a:1", "b:2"], "booster": "c:3"}})
+        self.assertEqual(enrich.resolve_models(None, self.tmp), ["a:1", "b:2"])
+        self.assertEqual(enrich.resolve_models([], self.tmp), ["a:1", "b:2"])
+
+    def test_single_string_enricher(self):
+        self.config({"models": {"enricher": "a:1"}})
+        self.assertEqual(enrich.resolve_models(None, self.tmp), ["a:1"])
+
+    def test_nothing_anywhere_is_an_error_that_says_what_to_do(self):
+        self.config({"rules": {}})
+        with self.assertRaises(enrich.EnrichError) as cm:
+            enrich.resolve_models(None, self.tmp)
+        self.assertIn("enricher", str(cm.exception))
+        self.assertIn("--models", str(cm.exception))
+
+    def test_corrupt_or_missing_config_is_an_error(self):
+        with self.assertRaises(enrich.EnrichError):
+            enrich.resolve_models(None, self.tmp)
+        self.config("{bad")
+        with self.assertRaises(enrich.EnrichError):
+            enrich.resolve_models(None, self.tmp)
+
+
 class PureHelperTests(unittest.TestCase):
     def test_extract_json(self):
         self.assertEqual(enrich.extract_json('{"a": 1}'), '{"a": 1}')
