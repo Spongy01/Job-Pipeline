@@ -14,6 +14,7 @@ Options:
   --num-ctx N          context window passed to Ollama (default: 8192)
   --retries N          extra attempts when a model returns invalid output (default: 1)
   --think              let reasoning models think (off by default, much faster)
+  --keep-loaded        do not unload each model from memory when it is finished
 
 enriched.json is a list of the clean.json jobs. Each gets an "enrichment" object
 keyed by model name. Existing entries are kept, so models can be added in
@@ -22,6 +23,7 @@ server is unreachable, a model is missing, or any job/model pair failed.
 """
 import argparse
 import importlib.util
+import inspect
 import json
 import re
 import sys
@@ -31,6 +33,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from clean import write_json_atomic  # noqa: E402
+from jd_flags import detect as detect_jd_flags  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_NUM_CTX = 8192
@@ -129,7 +132,8 @@ def enrich_one(client, model, prompt, resume_text, job, num_ctx, think, retries)
             content = call_model(client, model, messages, num_ctx, think)
             output = prompt.Output.model_validate_json(extract_json(content))
             if hasattr(prompt, "postprocess"):
-                output = prompt.postprocess(output)
+                takes_job = len(inspect.signature(prompt.postprocess).parameters) > 1
+                output = prompt.postprocess(output, job) if takes_job else prompt.postprocess(output)
             data = output.model_dump()
             data["score"], data["score_breakdown"] = prompt.score(output)
             del data["scores"]
@@ -158,6 +162,14 @@ def enrich_one(client, model, prompt, resume_text, job, num_ctx, think, retries)
     }
 
 
+def unload_model(client, model):
+    """Ask Ollama to drop the model from memory. Failure is not an error."""
+    try:
+        client.chat(model=model, messages=[], keep_alive=0)
+    except Exception:
+        pass
+
+
 def check_models(client, models):
     try:
         listed = client.list()
@@ -179,7 +191,7 @@ def check_models(client, models):
 
 def run(root, run_date, models, limit=None, prompt_version="v1", input_name="clean.json",
         out_dir=None, force=False, num_ctx=DEFAULT_NUM_CTX, retries=1, think=False,
-        client=None, resume_text=None, log=lambda msg: None):
+        client=None, resume_text=None, unload=True, log=lambda msg: None):
     root = Path(root)
     run_dir = root / "runs" / run_date
     jobs = load_json(run_dir / input_name, input_name)
@@ -202,16 +214,22 @@ def run(root, run_date, models, limit=None, prompt_version="v1", input_name="cle
             existing[str(job["id"])] = job
 
     selected = jobs[:limit] if limit else jobs
-    result_jobs, counts = [], {"jobs": 0, "done": 0, "skipped_existing": 0, "failed": 0, "skipped_closed": 0}
+    counts = {"jobs": len(selected), "done": 0, "skipped_existing": 0, "failed": 0, "skipped_closed": 0}
+    entries = []
     for job in selected:
-        counts["jobs"] += 1
         entry = dict(job)
         entry["enrichment"] = dict(existing.get(str(job["id"]), {}).get("enrichment", {}))
-        if job.get("closed") or not job.get("description"):
-            counts["skipped_closed"] += 1
-            result_jobs.append(entry)
-            continue
-        for model in models:
+        entries.append(entry)
+    for job, entry in zip(selected, entries):
+        if not job.get("closed") and job.get("description"):
+            entry["jd_flags"] = detect_jd_flags(job["description"])  # keyword flags, no model
+    counts["skipped_closed"] = sum(1 for j in selected if j.get("closed") or not j.get("description"))
+
+    # one model at a time, so only one model has to be in memory
+    for model in models:
+        for job, entry in zip(selected, entries):
+            if job.get("closed") or not job.get("description"):
+                continue
             prev = entry["enrichment"].get(model)
             if prev and prev.get("ok") and prev.get("prompt_version") == prompt.VERSION and not force:
                 counts["skipped_existing"] += 1
@@ -225,7 +243,10 @@ def run(root, run_date, models, limit=None, prompt_version="v1", input_name="cle
             else:
                 counts["failed"] += 1
                 log("   FAILED: %s" % res["error"])
-        result_jobs.append(entry)
+        if unload:
+            unload_model(client, model)
+            log("unloaded %s" % model)
+    result_jobs = entries
 
     # keep previously enriched jobs that were not part of this run
     handled = {str(j["id"]) for j in result_jobs}
@@ -248,6 +269,7 @@ def main(argv):
     p.add_argument("--num-ctx", type=int, default=DEFAULT_NUM_CTX)
     p.add_argument("--retries", type=int, default=1)
     p.add_argument("--think", action="store_true")
+    p.add_argument("--keep-loaded", action="store_true")
     args = p.parse_args(argv)
     try:
         datetime.strptime(args.date, "%Y-%m-%d")
@@ -257,6 +279,7 @@ def main(argv):
         summary = run(ROOT, args.date, args.models, limit=args.limit, prompt_version=args.prompt_version,
                       input_name=args.input, out_dir=args.out_dir, force=args.force,
                       num_ctx=args.num_ctx, retries=args.retries, think=args.think,
+                      unload=not args.keep_loaded,
                       log=lambda m: print(m, file=sys.stderr, flush=True))
     except EnrichError as e:
         sys.exit("enrich.py: %s" % e)

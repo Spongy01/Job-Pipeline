@@ -34,11 +34,15 @@ class FakeClient:
         self.replies = list(replies)
         self.models = models
         self.calls = []
+        self.unloaded = []
 
     def list(self):
         return {"models": [{"model": m} for m in self.models]}
 
     def chat(self, **kwargs):
+        if kwargs.get("keep_alive") == 0:
+            self.unloaded.append(kwargs["model"])
+            return {}
         self.calls.append(kwargs)
         r = self.replies.pop(0) if len(self.replies) > 1 else self.replies[0]
         if isinstance(r, Exception):
@@ -124,6 +128,56 @@ class PostprocessTests(unittest.TestCase):
         self.assertEqual([s.skill for s in out.preferred_skills], ["Rust"])
 
 
+class V2SchemaTests(unittest.TestCase):
+    def setUp(self):
+        self.prompt = enrich.load_prompt("v2", PROJECT)
+
+    def test_v2_reply_validates_and_has_no_authorization_or_clearance_fields(self):
+        out = self.prompt.Output.model_validate_json(reply())
+        self.assertNotIn("work_authorization", self.prompt.Output.model_fields)
+        self.assertNotIn("clearance", self.prompt.Output.model_fields)
+        self.assertEqual(out.required_skills[0].skill, "Python")
+
+    def test_optional_fields_default_instead_of_failing(self):
+        data = json.loads(reply(required_skills=[{"skill": "Python", "in_resume": "yes"}]))
+        out = self.prompt.Output.model_validate(data)
+        self.assertEqual(out.required_skills[0].resume_evidence, "")
+        self.assertIsNone(out.required_skills[0].learnable_in_a_day)
+
+    def test_score_detail_adds_up(self):
+        out = self.prompt.Output.model_validate(json.loads(reply(
+            required_skills=[skill("a"), skill("b", "similar", True), skill("c", "no", True), skill("d", "no", False)],
+            preferred_skills=[skill("e", "no", False)])))
+        total, b = self.prompt.score(out)
+        req = b["detail"]["required_skills"]
+        self.assertEqual(req["max"], 40)
+        self.assertEqual([i["weight"] for i in req["items"]], [1.0, 0.75, 0.5, 0.0])
+        self.assertAlmostEqual(sum(i["points"] for i in req["items"]), b["required_skills"], places=1)
+        self.assertEqual(b["detail"]["learnability"], {"max": 10, "gaps": 4, "learnable_gaps": 2})
+        parts = ("required_skills", "preferred_skills", "learnability", "experience_fit", "role_alignment")
+        self.assertEqual(total, round(sum(b[k] for k in parts)))
+
+    def test_score_detail_empty_lists(self):
+        out = self.prompt.Output.model_validate(json.loads(reply(required_skills=[], preferred_skills=[])))
+        _, b = self.prompt.score(out)
+        self.assertTrue(b["detail"]["required_skills"]["empty_list_default"])
+        self.assertEqual(b["detail"]["required_skills"]["items"], [])
+        self.assertEqual(b["required_skills"], 20)
+
+    def test_enrich_one_stores_v2(self):
+        res = enrich.enrich_one(FakeClient([reply()]), "m1", self.prompt, "R", make_job(), 4096, False, 0)
+        self.assertTrue(res["ok"])
+        self.assertEqual(res["prompt_version"], "v2")
+
+    def test_v1_postprocess_still_works_without_job(self):
+        v1 = enrich.load_prompt("v1", PROJECT)
+        res = enrich.enrich_one(FakeClient([reply()]), "m1", v1, "R", make_job(), 4096, False, 0)
+        self.assertTrue(res["ok"])
+
+    def test_v1_still_loads_and_is_unchanged_in_version(self):
+        self.assertEqual(enrich.load_prompt("v1", PROJECT).VERSION, "v1")
+
+
 class EnrichOneTests(unittest.TestCase):
     def setUp(self):
         self.prompt = enrich.load_prompt("v1", PROJECT)
@@ -203,6 +257,41 @@ class RunTests(unittest.TestCase):
         self.assertTrue(out[0]["enrichment"]["m1"]["ok"])
         self.assertEqual(out[1]["enrichment"], {})  # closed job skipped
         self.assertEqual(self.clean.read_bytes(), before)
+
+    def test_models_run_one_at_a_time_and_are_unloaded(self):
+        client = FakeClient([reply()])
+        self.run_it(client, models=["m1", "m2"])
+        order = [c["model"] for c in client.calls]
+        self.assertEqual(order, ["m1", "m1", "m2", "m2"])  # all of m1 before any of m2
+        self.assertEqual(client.unloaded, ["m1", "m2"])
+
+    def test_keep_loaded(self):
+        client = FakeClient([reply()])
+        self.run_it(client, unload=False)
+        self.assertEqual(client.unloaded, [])
+
+    def test_unload_failure_is_ignored(self):
+        class Broken(FakeClient):
+            def chat(self, **kw):
+                if kw.get("keep_alive") == 0:
+                    raise RuntimeError("nope")
+                return super().chat(**kw)
+        self.assertEqual(self.run_it(Broken([reply()]))["failed"], 0)
+
+    def test_jd_flags_added_for_open_jobs_only(self):
+        jobs = [make_job("1", description="We do not sponsor visas. Active Secret clearance required. " * 5),
+                make_job("2", closed=True)]
+        self.clean.write_text(json.dumps(jobs))
+        self.run_it(FakeClient([reply()]))
+        out = self.load()
+        self.assertIs(out[0]["jd_flags"]["sponsorship"], False)
+        self.assertTrue(out[0]["jd_flags"]["clearance"])
+        self.assertNotIn("jd_flags", out[1])
+
+    def test_jd_flags_do_not_depend_on_models_or_skips(self):
+        self.run_it(FakeClient([reply()]))
+        self.run_it(FakeClient([reply()]))  # everything skipped the second time
+        self.assertIn("jd_flags", self.load()[0])
 
     def test_limit(self):
         summary = self.run_it(FakeClient([reply()]), limit=1)
