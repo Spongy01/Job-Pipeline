@@ -289,6 +289,7 @@
     var wrap = h("div");
     wrap.appendChild(h("h1", { text: job.posting_name || "(untitled)" }));
     wrap.appendChild(h("div", { class: "sub", text: [job.company, job.location, job.work_model, job.posted_text, job.stage ? "stage: " + job.stage : ""].filter(Boolean).join(" · ") }));
+    wrap.appendChild(yearsLine(job));
     wrap.appendChild(headRow(job, models));
     if (job.stage === "rejected" && job.filter) wrap.appendChild(rejectedBanner(job.filter));
     if (job.boost && job.boost.plan) wrap.appendChild(h("div", { class: "banner" }, h("b", { text: "Boost: " }), job.boost.plan.verdict || ""));
@@ -313,6 +314,19 @@
     return wrap;
   }
 
+  // "Experience required: 2 years" from the filter step (the JD's required overall years), or a note when the JD gives none
+  function yearsText(years) {
+    if (!years || typeof years.min !== "number" || typeof years.max !== "number") return "not stated in the job description";
+    var num = function (n) { return String(Math.round(n * 10) / 10); };
+    var unit = function (n) { return n === 1 ? "year" : "years"; };
+    return years.min === years.max ? num(years.min) + " " + unit(years.min) : num(years.min) + " to " + num(years.max) + " years";
+  }
+  function yearsLine(job) {
+    var years = job.filter ? job.filter.years_required : null;
+    var line = h("div", { class: "years" }, h("b", { text: "Experience required: " }), yearsText(years));
+    if (years && job.filter.years_model) line.appendChild(h("span", { class: "muted", text: " (" + job.filter.years_model + ")" }));
+    return line;
+  }
   function headRow(job, models) {
     var row = h("div", { class: "head-row" });
     var external = job.apply_type === "external" && safeUrl(job.apply_url);

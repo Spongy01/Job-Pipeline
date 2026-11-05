@@ -43,6 +43,14 @@ class WebFilesTests(unittest.TestCase):
         self.assertRegex(js, r"fetch\(")  # still only the page's own api calls
         self.assertNotRegex(js, r"""fetch\(\s*["']https?://""")
 
+    def test_job_page_shows_years_required_at_the_top(self):
+        js = self.read("app.js")
+        self.assertIn("years_required", js)
+        self.assertIn("Experience required", js)
+        self.assertIn("function yearsText", js)
+        # placed right after the title line, before the buttons row
+        self.assertLess(js.index("yearsLine(job)"), js.index("wrap.appendChild(headRow(job, models))"))
+
     def test_no_dependencies_or_build_step(self):
         self.assertFalse((WEB / "package.json").exists())
         self.assertFalse(list(WEB.glob("node_modules")))

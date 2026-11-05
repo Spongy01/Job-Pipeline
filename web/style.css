@@ -94,3 +94,5 @@ table.tally th { color:var(--muted); font-weight:600; font-size:12px; text-trans
 @media (max-width: 900px) { .body { grid-template-columns:1fr; } .nav { max-height:40vh; } }
 
 .card.fresh { border-color:var(--green); box-shadow:0 0 0 1px var(--green); }
+
+.years { font-size:15px; margin:0 0 12px; }
