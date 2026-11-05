@@ -22,7 +22,6 @@ separate runs. Prints one line of JSON (counts). Exit code is non-zero if the
 server is unreachable, a model is missing, or any job/model pair failed.
 """
 import argparse
-import importlib.util
 import inspect
 import json
 import re
@@ -34,13 +33,18 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from clean import write_json_atomic  # noqa: E402
 from jd_flags import detect as detect_jd_flags  # noqa: E402
+from llm import (LLMError, call_model, check_models, extract_json, generate_json,  # noqa: E402,F401
+                 load_prompt as _load_prompt, unload_model)
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_NUM_CTX = 8192
 
 
-class EnrichError(Exception):
-    pass
+EnrichError = LLMError
+
+
+def load_prompt(version, root=ROOT):
+    return _load_prompt(version, root, "enrich")
 
 
 # ---------- inputs ----------
@@ -59,16 +63,6 @@ def load_resume_text(pdf_path):
     if not text:
         raise EnrichError("no text could be extracted from %s" % pdf_path)
     return text
-
-
-def load_prompt(version, root=ROOT):
-    path = Path(root) / "prompts" / "enrich" / (version + ".py")
-    if not re.fullmatch(r"v\d+", version) or not path.is_file():
-        raise EnrichError("prompt version %r not found (expected %s)" % (version, path))
-    spec = importlib.util.spec_from_file_location("enrich_prompt_" + version, path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
 
 
 def load_json(path, what):
@@ -95,96 +89,33 @@ def build_messages(prompt, resume_text, job):
     return [{"role": "system", "content": prompt.SYSTEM}, {"role": "user", "content": user}]
 
 
-def call_model(client, model, messages, num_ctx, think):
-    # No `format=` here: the MLX runner rejects structured output (HTTP 501),
-    # so the JSON shape is requested in the prompt and validated afterwards.
-    kwargs = dict(model=model, messages=messages,
-                  options={"temperature": 0, "num_ctx": num_ctx}, think=think)
-    try:
-        resp = client.chat(**kwargs)
-    except Exception as e:
-        # some models reject the think flag; retry once without it
-        if "think" in str(e).lower():
-            kwargs.pop("think")
-            resp = client.chat(**kwargs)
-        else:
-            raise
-    return resp["message"]["content"] if isinstance(resp, dict) else resp.message.content
-
-
-def extract_json(text):
-    """Pull the JSON object out of a reply, tolerating code fences and chatter."""
-    text = (text or "").strip()
-    text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text)
-    start, end = text.find("{"), text.rfind("}")
-    if start == -1 or end <= start:
-        raise ValueError("no JSON object in the reply")
-    return text[start:end + 1]
-
-
 def enrich_one(client, model, prompt, resume_text, job, num_ctx, think, retries):
     messages = build_messages(prompt, resume_text, job)
     started = time.time()
-    last_error = None
-    for attempt in range(retries + 1):
-        content = None
-        try:
-            content = call_model(client, model, messages, num_ctx, think)
-            output = prompt.Output.model_validate_json(extract_json(content))
-            if hasattr(prompt, "postprocess"):
-                takes_job = len(inspect.signature(prompt.postprocess).parameters) > 1
-                output = prompt.postprocess(output, job) if takes_job else prompt.postprocess(output)
-            data = output.model_dump()
-            data["score"], data["score_breakdown"] = prompt.score(output)
-            del data["scores"]
-            return {
-                "ok": True,
-                "prompt_version": prompt.VERSION,
-                "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                "seconds": round(time.time() - started, 1),
-                "attempts": attempt + 1,
-                "data": data,
-            }
-        except Exception as e:  # invalid JSON, schema violation, transport error
-            last_error = "%s: %s" % (type(e).__name__, str(e)[:500])
-            if content:  # repair turn: show the model what was wrong
-                messages = messages[:2] + [
-                    {"role": "assistant", "content": content},
-                    {"role": "user", "content": "That reply was not valid. Problem: %s\nReturn the corrected JSON object only." % last_error},
-                ]
-    return {
-        "ok": False,
+
+    def parse(content):
+        output = prompt.Output.model_validate_json(extract_json(content))
+        if hasattr(prompt, "postprocess"):
+            takes_job = len(inspect.signature(prompt.postprocess).parameters) > 1
+            output = prompt.postprocess(output, job) if takes_job else prompt.postprocess(output)
+        data = output.model_dump()
+        data["score"], data["score_breakdown"] = prompt.score(output)
+        del data["scores"]
+        return data
+
+    data, error, attempts = generate_json(client, model, messages, parse, num_ctx, think, retries)
+    result = {
+        "ok": data is not None,
         "prompt_version": prompt.VERSION,
         "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "seconds": round(time.time() - started, 1),
-        "attempts": retries + 1,
-        "error": last_error,
+        "attempts": attempts,
     }
-
-
-def unload_model(client, model):
-    """Ask Ollama to drop the model from memory. Failure is not an error."""
-    try:
-        client.chat(model=model, messages=[], keep_alive=0)
-    except Exception:
-        pass
-
-
-def check_models(client, models):
-    try:
-        listed = client.list()
-    except Exception as e:
-        raise EnrichError("cannot reach the Ollama server (is `ollama serve` running?): %s" % e)
-    entries = listed["models"] if isinstance(listed, dict) else listed.models
-    names = set()
-    for m in entries:
-        name = m["model"] if isinstance(m, dict) else m.model
-        names.add(name)
-        if name.endswith(":latest"):
-            names.add(name[: -len(":latest")])
-    missing = [m for m in models if m not in names and (m + ":latest") not in names]
-    if missing:
-        raise EnrichError("model(s) not downloaded: %s (have: %s)" % (", ".join(missing), ", ".join(sorted(names))))
+    if data is not None:
+        result["data"] = data
+    else:
+        result["error"] = error
+    return result
 
 
 # ---------- main flow ----------
