@@ -1,0 +1,18 @@
+{
+  "searches": [
+    { 
+        "name": "general-us", 
+        "url": "https://www.linkedin.com/jobs/search-results/?currentJobId=4452059572&keywords=%22AI%22%20OR%20%22ML%22%20OR%20%22Machine%20Learning%22%20OR%20%22Artificial%20Intelligence%22%20OR%20%22GenAI%22%20OR%20%22Software%22%20OR%20%22Early%20Career%22%20OR%20%22SDE%22%20or%20%22SWE%22&origin=JOB_SEARCH_PAGE_SEARCH_BUTTON&geoId=103644278&f_TPR=r86400", 
+        "pages": 1 }
+  ],
+  "resume_path": "resume/Ali_Asgar_Resume.pdf",
+  "rules": {
+    "experience_years": { "min": 0, "max": 3 },
+    "must_have_stacks": [],
+    "avoid_stacks": [],
+    "locations": [],
+    "work_models": ["remote", "hybrid"],
+    "exclude_keywords": [],
+    "notes": "free-text rules for the filter stage"
+  }
+}
