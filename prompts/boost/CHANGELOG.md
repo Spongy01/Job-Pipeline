@@ -3,7 +3,7 @@
 A released version is never edited. To change the prompt, copy `vN.py` to `vN+1.py` and run
 `scripts/boost.py --prompt-version vN+1`. Each output records the `prompt_version` it was made with.
 
-## v1 (in progress, refined on runs/2026-11-04, model qwen3.5:9b)
+## v1 (frozen 2026-11-05, refined on runs/2026-11-04, model qwen3.5:9b)
 
 Three calls: PLAN (JSON per selected job), SPEC (Markdown, only for a new project), ROLLUP (JSON, once per day).
 Honesty rules are in the prompt and enforced in code (see scripts/boost_data.py): em dashes are replaced,
@@ -48,3 +48,11 @@ repo-aware tally. Still wrong:
 4. The rollup's general project still covered TypeScript although told not to; code now warns when it does.
 5. Generic words (integration, testing, deployment) matched the repo summaries and showed up as "already in your
    repos"; a small stop list (`GENERIC_TERMS`) prevents it.
+
+### Round 3 findings and the freeze
+
+Fixed: the checks now surface every problem found in round 2 (dropped details, appended claims, repo-proven
+skills). Still wrong, and not fixable by more prompt rounds on a 9B model: rewordings invent small claims
+("analyzing JSON logs for error patterns", "object-oriented error handling logic"). Decision: keep them, but any
+rewording with a problem is shown under "Risky rewordings" with its reasons, and the clean ones are listed first.
+v1 is frozen here; further changes go into v2.

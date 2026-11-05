@@ -392,11 +392,14 @@ class RewordingDiffTests(unittest.TestCase):
         r, warnings = self.check("Architected a production-grade LLM API gateway in Python/FastAPI supporting OpenAI, "
                                  "Anthropic, and Ollama, sustaining 100 RPS with under 2ms p95 gateway overhead.")
         self.assertEqual((r["added_text"], r["drops"], warnings), ("", [], []))
+        self.assertEqual((r["risky"], r["problems"]), (False, []))
 
     def test_appended_claim_is_shown_and_unsupported_words_warned(self):
         r, warnings = self.check(self.RESUME + " Added unit tests for core logic using pytest.")
         self.assertIn("Added unit tests", r["added_text"])
         self.assertTrue(any("introduces words" in w and "logic" in w for w in warnings))
+        self.assertTrue(r["risky"])
+        self.assertEqual(r["problems"], warnings)
         self.assertFalse(any("pytest" in w for w in warnings))  # pytest is in the project summary
 
     def test_addition_made_of_known_words_is_shown_without_a_warning(self):
@@ -404,6 +407,7 @@ class RewordingDiffTests(unittest.TestCase):
                                  "Anthropic, and Ollama, sustaining 100 RPS with under 2ms p95 gateway overhead and Prometheus.")
         self.assertIn("Prometheus", r["added_text"])
         self.assertEqual(warnings, [])
+        self.assertFalse(r["risky"])
 
     def test_dropped_numbers_and_named_tools_are_warned(self):
         r, warnings = self.check("Architected a scalable AI infrastructure layer in Python supporting multiple models, "
@@ -412,6 +416,7 @@ class RewordingDiffTests(unittest.TestCase):
             self.assertIn(dropped, r["drops"])
         self.assertNotIn("100", r["drops"])
         self.assertTrue(any(w.startswith("The rewording drops") for w in warnings))
+        self.assertTrue(r["risky"])
 
     def test_first_word_and_plain_capitalised_verbs_are_not_named_tools(self):
         r, _ = self.check("Built a production-grade LLM API gateway in Python/FastAPI supporting OpenAI, Anthropic, "

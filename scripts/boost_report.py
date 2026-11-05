@@ -55,6 +55,18 @@ def _rollup_section(rollup):
     return lines
 
 
+def _reword_lines(r):
+    where = r.get("resume_location") or "Resume"
+    lines = ["- **%s**" % where, "  - Now: %s" % r.get("current_text", ""), "  - Suggested: %s" % r.get("suggested_text", "")]
+    if r.get("added_text"):
+        lines.append("  - New in this wording: %s" % r["added_text"])
+    if r.get("jd_skills_aligned"):
+        lines.append("  - Speaks to: %s" % _list(r["jd_skills_aligned"]))
+    if r.get("why"):
+        lines.append("  - Why: %s" % r["why"])
+    return lines
+
+
 def _job_section(record):
     job = record.get("job", {})
     head = "## %s. %s, %s" % (record.get("rank", "?"), job.get("company", "?"), job.get("posting_name", "?"))
@@ -77,18 +89,19 @@ def _job_section(record):
         lines += ["### Add to your resume (your repos already show these)", ""]
         lines += ["- %s: shown in %s" % (a["skill"], ", ".join(a["projects"])) for a in record["resume_additions"]]
         lines.append("")
-    if plan.get("rewordings"):
+    rewordings = plan.get("rewordings") or []
+    safe = [r for r in rewordings if not r.get("risky")]
+    risky = [r for r in rewordings if r.get("risky")]
+    if safe:
         lines += ["### Rewordings", ""]
-        for r in plan["rewordings"]:
-            where = r.get("resume_location") or "Resume"
-            lines += ["- **%s**" % where, "  - Now: %s" % r.get("current_text", ""),
-                      "  - Suggested: %s" % r.get("suggested_text", "")]
-            if r.get("added_text"):
-                lines.append("  - New in this wording: %s" % r["added_text"])
-            if r.get("jd_skills_aligned"):
-                lines.append("  - Speaks to: %s" % _list(r["jd_skills_aligned"]))
-            if r.get("why"):
-                lines.append("  - Why: %s" % r["why"])
+        for r in safe:
+            lines += _reword_lines(r)
+        lines.append("")
+    if risky:
+        lines += ["### Risky rewordings (they add claims or lose details; use only what is true)", ""]
+        for r in risky:
+            lines += _reword_lines(r)
+            lines += ["  - Problem: %s" % p for p in r.get("problems", [])]
         lines.append("")
     if plan.get("project_extensions"):
         lines += ["### Extend an existing project", ""]
@@ -120,8 +133,10 @@ def _job_section(record):
         lines += ["### Skipped gaps", ""]
         lines += ["- %s: %s" % (g["skill"], g.get("reason", "")) for g in plan["skipped_gaps"]]
         lines.append("")
-    if record.get("warnings"):
-        lines += ["### Check these", ""] + ["- %s" % w for w in record["warnings"]] + [""]
+    other = [w for w in record.get("warnings", [])
+             if not any(w in r.get("problems", []) for r in rewordings)]
+    if other:
+        lines += ["### Check these", ""] + ["- %s" % w for w in other] + [""]
     return lines
 
 

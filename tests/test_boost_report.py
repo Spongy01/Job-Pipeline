@@ -61,6 +61,21 @@ class ReportTests(unittest.TestCase):
         self.assertIn("- TypeScript: shown in sundial, Solwards", text)
         self.assertIn("  - New in this wording: and Prometheus.", text)
 
+    def test_risky_rewordings_are_in_their_own_section_with_reasons(self):
+        r = record(1)
+        safe = {"current_text": "Built A.", "suggested_text": "Built A well.", "resume_location": "Projects", "risky": False}
+        bad = {"current_text": "Built B.", "suggested_text": "Built B and C.", "resume_location": "Experience", "risky": True,
+               "problems": ["The rewording adds 'C', which is not on your resume or in your project summaries."]}
+        r["plan"]["rewordings"] = [bad, safe]
+        r["warnings"] = list(bad["problems"]) + ["Project not found in projects.md: 'X'"]
+        text = br.render_report("d", None, [r], [])
+        self.assertLess(text.index("### Rewordings"), text.index("### Risky rewordings"))
+        self.assertLess(text.index("Built A well."), text.index("Built B and C."))
+        self.assertIn("  - Problem: The rewording adds 'C'", text)
+        check = text[text.index("### Check these"):]
+        self.assertIn("Project not found in projects.md", check)
+        self.assertNotIn("The rewording adds 'C'", check)  # shown once, under the risky rewording
+
     def test_warnings_listed(self):
         text = br.render_report("d", ROLLUP, [record(1, warnings=["Reworded text not found in the resume: 'z'"])], [])
         self.assertIn("### Check these", text)

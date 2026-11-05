@@ -178,28 +178,31 @@ def check_plan(plan, resume_text, project_names, gaps=None, projects_md=""):
     allowed_numbers = _numbers(resume_text) | _numbers(repo_text)
     warnings = []
     for r in checked["rewordings"]:
+        problems = []
         quote = _norm(r.get("current_text"))
         r["current_text_found"] = bool(quote) and quote in resume
         if not r["current_text_found"]:
-            warnings.append("Reworded text not found in the resume: %r" % (r.get("current_text") or "")[:120])
+            problems.append("Reworded text not found in the resume: %r" % (r.get("current_text") or "")[:120])
         new_words = [t for t in r.get("jd_skills_aligned", [])
                      if _has_term(_norm(r.get("suggested_text")), skill_key(t))
                      and not _has_term(_norm(r.get("current_text")), skill_key(t))]
         r["adds_from_repo"] = [t for t in new_words if not _has_term(resume, skill_key(t)) and _has_term(repo_text, skill_key(t))]
         r["adds_unsupported"] = [t for t in new_words if not _has_term(resume, skill_key(t)) and not _has_term(repo_text, skill_key(t))]
         for t in r["adds_unsupported"]:
-            warnings.append("The rewording adds %r, which is not on your resume or in your project summaries." % t)
+            problems.append("The rewording adds %r, which is not on your resume or in your project summaries." % t)
         r["added_text"] = " ... ".join(added_segments(r.get("current_text"), r.get("suggested_text")))
         if not r["adds_unsupported"]:
             known_words = set(re.findall(r"[a-z][a-z0-9+#-]{4,}", resume + " " + repo_text + " " + _norm(r.get("current_text"))))
             new = [w for w in dict.fromkeys(re.findall(r"[a-z][a-z0-9+#-]{4,}", r["added_text"].lower()))
                    if w not in known_words and w not in _STOPWORDS]
             if new:
-                warnings.append("The rewording introduces words that are not in your resume or project summaries: %s. "
+                problems.append("The rewording introduces words that are not in your resume or project summaries: %s. "
                                 "Check that this is true." % ", ".join(new))
         r["drops"] = dropped_specifics(r.get("current_text"), r.get("suggested_text"))
         if r["drops"]:
-            warnings.append("The rewording drops: %s." % ", ".join(r["drops"]))
+            problems.append("The rewording drops: %s." % ", ".join(r["drops"]))
+        r["problems"], r["risky"] = problems, bool(problems)
+        warnings.extend(problems)
     for e in checked["project_extensions"]:
         e["project_known"] = (e.get("project") or "").strip().lower() in known
         if not e["project_known"]:
