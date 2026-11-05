@@ -73,12 +73,18 @@ def _job_section(record):
     plan = record["plan"]
     lines += ["**%s**" % plan.get("verdict", ""), ""]
 
+    if record.get("resume_additions"):
+        lines += ["### Add to your resume (your repos already show these)", ""]
+        lines += ["- %s: shown in %s" % (a["skill"], ", ".join(a["projects"])) for a in record["resume_additions"]]
+        lines.append("")
     if plan.get("rewordings"):
         lines += ["### Rewordings", ""]
         for r in plan["rewordings"]:
             where = r.get("resume_location") or "Resume"
             lines += ["- **%s**" % where, "  - Now: %s" % r.get("current_text", ""),
                       "  - Suggested: %s" % r.get("suggested_text", "")]
+            if r.get("added_text"):
+                lines.append("  - New in this wording: %s" % r["added_text"])
             if r.get("jd_skills_aligned"):
                 lines.append("  - Speaks to: %s" % _list(r["jd_skills_aligned"]))
             if r.get("why"):

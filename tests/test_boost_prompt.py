@@ -80,6 +80,8 @@ class TemplateTests(unittest.TestCase):
         self.assertIn("em dash", plan_prompt)
         self.assertIn("[your measured result]", p.SYSTEM_PLAN)
         self.assertIn("already in your repos", p.SYSTEM_ROLLUP)
+        self.assertIn("already in your repos", p.SYSTEM_PLAN)
+        self.assertIn("Keep every number, metric and named tool", p.SYSTEM_PLAN)
         self.assertIn("never invent", p.SYSTEM_ROLLUP.lower())
         self.assertIn("never invent", p.SYSTEM_SPEC.lower())
 

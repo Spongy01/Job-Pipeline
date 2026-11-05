@@ -30,3 +30,21 @@ rewording quotes are checked against the resume, project names against resume/pr
 6. The tally had "AWS/GCP/Azure", "Azure", "cloud platforms" and "cloud infrastructure" as separate rows.
    Merged through a small alias table (`SKILL_ALIASES` in scripts/boost_data.py).
 7. Pathway steps numbered by the model ("1 - ...") on top of the report's own numbering. Stripped in code.
+
+### Round 2 findings (second run on the same 5 jobs)
+
+Fixed: the padded Morningstar plan, no-op rewordings, invented numbers (placeholders used), skill grouping, the
+repo-aware tally. Still wrong:
+
+1. Rewordings drop specifics and inflate: "Flask SSE", "OpenAI, Anthropic, Ollama" and "under 2ms p95" were
+   removed, and "top-K retrieval accuracy" became "AI solution accuracy". Code now lists what a rewording drops
+   (numbers, ALL CAPS and capitalised tool names missing from the new text) as a warning, and the prompt says to
+   keep every number, metric and named tool.
+2. Rewordings that append a claim ("Added unit tests for core logic using pytest" when Conduit has none). Code now
+   shows exactly what a rewording added (word level diff, `added_text`, printed as "New in this wording") and warns
+   about words in it that are in neither the resume nor the project summaries.
+3. A per-job plan skipped TypeScript as "small projects" although the repos prove it. Per job, gaps that the repos
+   already show are now marked in the prompt ("no need to build it") and listed by code under "Add to your resume".
+4. The rollup's general project still covered TypeScript although told not to; code now warns when it does.
+5. Generic words (integration, testing, deployment) matched the repo summaries and showed up as "already in your
+   repos"; a small stop list (`GENERIC_TERMS`) prevents it.

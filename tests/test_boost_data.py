@@ -162,7 +162,7 @@ class ProjectsAndChecksTests(unittest.TestCase):
 
     def plan(self):
         return {"verdict": "v",
-                "rewordings": [{"current_text": "Built a rate limiter with Redis Lua scripts.", "suggested_text": "s"},
+                "rewordings": [{"current_text": "Built a rate limiter with Redis Lua scripts.", "suggested_text": "Built a rate limiter using Redis Lua scripts."},
                                {"current_text": "Invented line that is not there", "suggested_text": "s"}],
                 "project_extensions": [{"project": "conduit", "what_to_build": "x"},
                                        {"project": "Imaginary", "what_to_build": "y"}]}
@@ -375,6 +375,67 @@ class ExtraCheckTests(unittest.TestCase):
         self.assertEqual(r[0]["adds_unsupported"], ["Kafka"])
         self.assertEqual(r[1]["adds_from_repo"], ["Pydantic"])
         self.assertEqual((r[2]["adds_unsupported"], r[2]["adds_from_repo"]), ([], []))
+
+
+class RewordingDiffTests(unittest.TestCase):
+    RESUME = ("Architected a production-grade LLM API gateway in Python/FastAPI supporting OpenAI, Anthropic, and "
+              "Ollama, sustaining 100 RPS with under 2ms p95 gateway overhead.")
+    PROJECTS = "## 1. Conduit\n\n**Stack.** pytest, Prometheus.\n"
+
+    def check(self, suggested, aligned=()):
+        plan = {"rewordings": [{"current_text": self.RESUME, "suggested_text": suggested,
+                                "jd_skills_aligned": list(aligned)}], "project_extensions": []}
+        checked, warnings = bd.check_plan(plan, self.RESUME, ["Conduit"], projects_md=self.PROJECTS)
+        return checked["rewordings"][0], warnings
+
+    def test_pure_reword_has_no_warnings(self):
+        r, warnings = self.check("Architected a production-grade LLM API gateway in Python/FastAPI supporting OpenAI, "
+                                 "Anthropic, and Ollama, sustaining 100 RPS with under 2ms p95 gateway overhead.")
+        self.assertEqual((r["added_text"], r["drops"], warnings), ("", [], []))
+
+    def test_appended_claim_is_shown_and_unsupported_words_warned(self):
+        r, warnings = self.check(self.RESUME + " Added unit tests for core logic using pytest.")
+        self.assertIn("Added unit tests", r["added_text"])
+        self.assertTrue(any("introduces words" in w and "logic" in w for w in warnings))
+        self.assertFalse(any("pytest" in w for w in warnings))  # pytest is in the project summary
+
+    def test_addition_made_of_known_words_is_shown_without_a_warning(self):
+        r, warnings = self.check("Architected a production-grade LLM API gateway in Python/FastAPI supporting OpenAI, "
+                                 "Anthropic, and Ollama, sustaining 100 RPS with under 2ms p95 gateway overhead and Prometheus.")
+        self.assertIn("Prometheus", r["added_text"])
+        self.assertEqual(warnings, [])
+
+    def test_dropped_numbers_and_named_tools_are_warned(self):
+        r, warnings = self.check("Architected a scalable AI infrastructure layer in Python supporting multiple models, "
+                                 "sustaining 100 requests per second with minimal latency.")
+        for dropped in ("2ms", "OpenAI", "Anthropic", "Ollama", "p95"):
+            self.assertIn(dropped, r["drops"])
+        self.assertNotIn("100", r["drops"])
+        self.assertTrue(any(w.startswith("The rewording drops") for w in warnings))
+
+    def test_first_word_and_plain_capitalised_verbs_are_not_named_tools(self):
+        r, _ = self.check("Built a production-grade LLM API gateway in Python/FastAPI supporting OpenAI, Anthropic, "
+                          "and Ollama, sustaining 100 RPS with under 2ms p95 gateway overhead.")
+        self.assertNotIn("Architected", r["drops"])
+
+
+class GapAnnotationTests(unittest.TestCase):
+    def test_generic_terms_never_count_as_in_repos(self):
+        md = "## 1. Conduit\n\n**Stack.** Integration tests, testing, deployment.\n"
+        out = bd.annotate_repos([{"skill": "Integration"}, {"skill": "Testing"}, {"skill": "Deployment"}], md, "")
+        self.assertEqual([r["in_repos"] for r in out], [[], [], []])
+
+    def test_format_gaps_marks_gaps_already_in_repos(self):
+        gaps = [{"skill": "TypeScript", "kind": "required", "status": "no", "flagged_by": [M9], "models_total": 1,
+                 "learnable_votes": 1, "single_model": False, "in_repos": ["sundial"], "on_resume": False}]
+        text = bd.format_gaps(gaps)
+        self.assertIn("already in your repos (sundial) but not on the resume: no need to build it", text)
+
+    def test_resume_additions(self):
+        gaps = [{"skill": "TypeScript", "in_repos": ["sundial", "Solwards"], "on_resume": False},
+                {"skill": "Kubernetes", "in_repos": [], "on_resume": False},
+                {"skill": "Docker", "in_repos": ["Conduit"], "on_resume": True}]
+        self.assertEqual(bd.resume_additions(gaps), [{"skill": "TypeScript", "projects": ["sundial", "Solwards"]}])
 
 
 if __name__ == "__main__":

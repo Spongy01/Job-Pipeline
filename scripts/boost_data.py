@@ -2,6 +2,7 @@
 
 Nothing in here calls a model or touches files, so it is tested with plain dicts.
 """
+import difflib
 import hashlib
 import re
 
@@ -188,6 +189,17 @@ def check_plan(plan, resume_text, project_names, gaps=None, projects_md=""):
         r["adds_unsupported"] = [t for t in new_words if not _has_term(resume, skill_key(t)) and not _has_term(repo_text, skill_key(t))]
         for t in r["adds_unsupported"]:
             warnings.append("The rewording adds %r, which is not on your resume or in your project summaries." % t)
+        r["added_text"] = " ... ".join(added_segments(r.get("current_text"), r.get("suggested_text")))
+        if not r["adds_unsupported"]:
+            known_words = set(re.findall(r"[a-z][a-z0-9+#-]{4,}", resume + " " + repo_text + " " + _norm(r.get("current_text"))))
+            new = [w for w in dict.fromkeys(re.findall(r"[a-z][a-z0-9+#-]{4,}", r["added_text"].lower()))
+                   if w not in known_words and w not in _STOPWORDS]
+            if new:
+                warnings.append("The rewording introduces words that are not in your resume or project summaries: %s. "
+                                "Check that this is true." % ", ".join(new))
+        r["drops"] = dropped_specifics(r.get("current_text"), r.get("suggested_text"))
+        if r["drops"]:
+            warnings.append("The rewording drops: %s." % ", ".join(r["drops"]))
     for e in checked["project_extensions"]:
         e["project_known"] = (e.get("project") or "").strip().lower() in known
         if not e["project_known"]:
@@ -227,6 +239,8 @@ def format_gaps(gaps):
             g["learnable_votes"], len(g["flagged_by"]))
         if g["single_model"]:
             line = line.replace(" | learnable", " (flagged by one model, check it against the resume) | learnable")
+        if g.get("in_repos") and not g.get("on_resume"):
+            line += " | already in your repos (%s) but not on the resume: no need to build it" % ", ".join(g["in_repos"])
         lines.append(line)
     return "\n".join(lines)
 
@@ -290,6 +304,12 @@ def repo_mentions(skill, index, terms=None):
             if any(_has_term(" ".join(lines).lower(), t) for t in terms)]
 
 
+# Words that are real gaps in a JD but say nothing about a skill, so a repo mentioning them proves nothing.
+GENERIC_TERMS = {"integration", "integrations", "testing", "tests", "deployment", "development", "engineering",
+                 "design", "automation", "infrastructure", "architecture", "data", "api", "apis", "systems",
+                 "software", "ai", "ml", "scalable ai applications"}
+
+
 def annotate_repos(rows, projects_md, resume_text):
     """Copy of the tally rows with `in_repos` (projects that show the skill) and `on_resume`."""
     index = projects_index(projects_md)
@@ -297,7 +317,8 @@ def annotate_repos(rows, projects_md, resume_text):
     out = []
     for row in rows:
         terms = next((t for _, display, t in SKILL_ALIASES if row["skill"] == display), None) or [skill_key(row["skill"])]
-        out.append({**row, "in_repos": repo_mentions(row["skill"], index, terms),
+        generic = skill_key(row["skill"]) in GENERIC_TERMS
+        out.append({**row, "in_repos": [] if generic else repo_mentions(row["skill"], index, terms),
                     "on_resume": any(_has_term(resume, t) for t in terms)})
     return out
 
@@ -340,3 +361,43 @@ _NUMBER = re.compile(r"\d[\d,]*(?:\.\d+)?\s*%?")
 
 def _numbers(text):
     return {n.replace(" ", "").rstrip(",") for n in _NUMBER.findall(text or "")}
+
+
+def resume_additions(gaps):
+    """Gaps that the repos already show but the resume does not: just add them to the skills line."""
+    return [{"skill": g["skill"], "projects": g["in_repos"]} for g in gaps if g.get("in_repos") and not g.get("on_resume")]
+
+
+# ---------- what a rewording changed ----------
+
+_STOPWORDS = {"using", "which", "their", "there", "these", "those", "would", "could", "should", "about", "across",
+              "after", "before", "while", "where", "other", "through", "within", "between", "under", "being",
+              "every", "while", "since", "great", "strong", "highly"}
+
+
+def _cmp(token):
+    return re.sub(r"[^a-z0-9+#]+", "", token.lower())
+
+
+def added_segments(current, suggested):
+    """Pieces of `suggested` that are not in `current` (word level diff, original spelling)."""
+    a, b = (current or "").split(), (suggested or "").split()
+    matcher = difflib.SequenceMatcher(None, [_cmp(t) for t in a], [_cmp(t) for t in b], autojunk=False)
+    return [" ".join(b[j1:j2]) for tag, _, _, j1, j2 in matcher.get_opcodes() if tag in ("insert", "replace")]
+
+
+def dropped_specifics(current, suggested):
+    """Numbers and named tools in `current` (digits, capitals after the first word, ALL CAPS) missing from `suggested`."""
+    if not (suggested or "").strip():
+        return []
+    suggested_lower = suggested.lower()
+    pieces = [re.sub(r"^[^A-Za-z0-9]+|[^A-Za-z0-9+#%]+$", "", p) for p in re.split(r"[\s/,;:()]+", current or "")]
+    drops = []
+    for i, piece in enumerate(p for p in pieces if p):
+        named = any(c.isdigit() for c in piece) or piece.isupper() and len(piece) > 1 \
+            or any(c.isupper() for c in piece[1:]) or (i > 0 and piece[0].isupper())
+        if not named or piece in drops:
+            continue
+        if not re.search(r"(?<![a-z0-9])%s(?![a-z0-9])" % re.escape(piece.lower()), suggested_lower):
+            drops.append(piece)
+    return drops

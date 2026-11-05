@@ -213,9 +213,31 @@ class RunTests(BoostTestCase):
         self.assertTrue(rec["ok"])
         self.assertEqual(len(rec["plan"]["rewordings"]), 1)  # kept, only flagged
         self.assertFalse(rec["plan"]["rewordings"][0]["current_text_found"])
-        self.assertEqual(len(rec["warnings"]), 2)
+        self.assertTrue(any("not found in the resume" in w for w in rec["warnings"]))
+        self.assertTrue(any("Imaginary" in w for w in rec["warnings"]))
         report = (self.run_dir / "boost.md").read_text()
         self.assertIn("### Check these", report)
+
+    def test_gaps_already_in_repos_become_resume_additions(self):
+        (self.tmp / "resume" / "projects.md").write_text(
+            "Projects: Conduit\n\n## 1. Conduit\n\n**Stack.** Python, Kubernetes manifests.\n")
+        self.setup_jobs([make_job("1")])
+        self.go()
+        rec = self.plan_file("1")
+        self.assertEqual(rec["resume_additions"], [{"skill": "Kubernetes", "projects": ["Conduit"]}])
+        gap = rec["gaps"][0]
+        self.assertEqual((gap["in_repos"], gap["on_resume"]), (["Conduit"], False))
+        user_prompt = [c for c in self.client.calls if c["kind"] == "plan"][0]["messages"][1]["content"]
+        self.assertIn("already in your repos (Conduit) but not on the resume: no need to build it", user_prompt)
+        self.assertIn("Add to your resume", (self.run_dir / "boost.md").read_text())
+
+    def test_general_project_covering_a_repo_skill_is_warned(self):
+        (self.tmp / "resume" / "projects.md").write_text(
+            "Projects: Conduit\n\n## 1. Conduit\n\n**Stack.** Python, Kubernetes manifests.\n")
+        self.setup_jobs([make_job("1")])
+        self.go()
+        rollup = json.loads((self.run_dir / "boost_rollup.json").read_text())
+        self.assertTrue(any("already in your repos" in w for w in rollup["warnings"]))
 
     def test_new_project_triggers_spec_call_and_file(self):
         plan = good_plan(new_project={"name": "Event Pipeline", "one_liner": "o", "jd_skills_covered": ["Kafka"],

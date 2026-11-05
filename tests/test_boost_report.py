@@ -53,6 +53,14 @@ class ReportTests(unittest.TestCase):
         self.assertIn("| TypeScript | 4 | 3 | 100% | sundial, BrokeNoMore |", text)
         self.assertIn("| AWS | 5 | 2 | 50% | no |", text)
 
+    def test_additions_and_new_words_shown(self):
+        r = record(1, resume_additions=[{"skill": "TypeScript", "projects": ["sundial", "Solwards"]}])
+        r["plan"]["rewordings"][0]["added_text"] = "and Prometheus."
+        text = br.render_report("d", None, [r], [])
+        self.assertIn("### Add to your resume (your repos already show these)", text)
+        self.assertIn("- TypeScript: shown in sundial, Solwards", text)
+        self.assertIn("  - New in this wording: and Prometheus.", text)
+
     def test_warnings_listed(self):
         text = br.render_report("d", ROLLUP, [record(1, warnings=["Reworded text not found in the resume: 'z'"])], [])
         self.assertIn("### Check these", text)

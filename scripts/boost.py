@@ -115,12 +115,13 @@ class Context:
 def plan_job(ctx, selected):
     """Plan for one selected job. Returns (record, spec_text or None)."""
     job = selected["job"]
-    gaps = bd.consolidate_gaps(job)
+    gaps = bd.annotate_repos(bd.consolidate_gaps(job), ctx.projects_md, ctx.resume_text)
     record = {"prompt_version": ctx.prompt.VERSION, "generated_at": now(),
               "job": {"id": str(job["id"]), "company": job.get("company"), "posting_name": job.get("posting_name"),
                       "linkedin_url": job.get("linkedin_url")},
               "rank": selected["rank"], "score": selected["score"], "score_model": selected["score_model"],
-              "fallback": selected["fallback"], "gaps": gaps}
+              "fallback": selected["fallback"], "gaps": gaps,
+              "resume_additions": bd.resume_additions(gaps)}
     started = time.time()
     user = ctx.prompt.USER_TEMPLATE_PLAN.format(
         resume=ctx.resume_text, projects=ctx.projects_md, title=job.get("posting_name") or "",
@@ -176,6 +177,12 @@ def build_rollup(ctx, passed, tally_hash, tally):
         record["spec_file"] = "boost/specs/rollup-%s.md" % slugify(gp["name"])
     except Exception as e:
         warnings.append("The spec for the general project could not be written: %s" % e)
+    from_repos = [r for r in tally if r.get("in_repos") and not r.get("on_resume")]
+    for skill in gp["jd_skills_covered"]:
+        for row in from_repos:
+            if bd._same_skill(skill, row["skill"]):
+                warnings.append("The general project covers %r, which is already in your repos (%s): add it to the "
+                                "resume instead of building it." % (skill, ", ".join(row["in_repos"])))
     record.update({"ok": True, "summary": data["summary"], "general_project": gp, "warnings": warnings})
     return record, spec_text
 
