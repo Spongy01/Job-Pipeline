@@ -220,6 +220,26 @@ class ErrorTests(ServeTestCase):
 
 
 class StartupTests(unittest.TestCase):
+    def test_port_already_in_use_gives_a_clear_message(self):
+        import socket
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, True)
+        (tmp / "scripts").mkdir()
+        for name in ("serve.py", "jobs_query.py", "clean.py"):
+            shutil.copy(SCRIPTS / name, tmp / "scripts" / name)
+        (tmp / "web").mkdir()
+        taken = socket.socket()
+        taken.bind(("127.0.0.1", 0))
+        taken.listen(1)
+        self.addCleanup(taken.close)
+        port = taken.getsockname()[1]
+        r = subprocess.run([sys.executable, str(tmp / "scripts" / "serve.py"), "--port", str(port)],
+                           capture_output=True, text=True, cwd="/", timeout=20)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("cannot listen on port %d" % port, r.stderr)
+        self.assertIn("--port", r.stderr)
+        self.assertNotIn("Traceback", r.stderr)
+
     def test_corrupt_jobs_json_refuses_to_start(self):
         tmp = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, tmp, True)

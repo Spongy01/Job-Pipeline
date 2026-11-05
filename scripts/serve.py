@@ -261,7 +261,11 @@ def main(argv):
         JobsStore(ROOT).jobs()  # refuse to start on a corrupt jobs.json
     except JobsError as e:
         sys.exit("serve.py: %s" % e)
-    server = create_server(ROOT, args.port, quiet=False)
+    try:
+        server = create_server(ROOT, args.port, quiet=False)
+    except OSError as e:
+        sys.exit("serve.py: cannot listen on port %d (%s). If the page is already running it is at "
+                 "http://localhost:%d/ ; otherwise pick another port with --port." % (args.port, e.strerror or e, args.port))
     print(json.dumps({"url": "http://localhost:%d/" % server.server_address[1]}), flush=True)
     try:
         server.serve_forever()
