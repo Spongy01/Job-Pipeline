@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Jobs page mockup v2</title>
+<style>
+  /* Palette A: Sage (default). Muted green and warm gray. */
+  :root, :root[data-pal="sage"] {
+    --bg:#eceee9; --panel:#fbfbf8; --nav:#f4f5f1; --ink:#2a2f2b; --muted:#788077; --line:#dcdfd8;
+    --green:#5d8a6b; --green-soft:#e2ebe4; --green-ink:#3d6a4b;
+    --amber:#9c7a42; --amber-soft:#f2e9d6; --red:#9c5a52; --red-soft:#f0e0dd;
+    --blue:#587896; --blue-soft:#e1e9f0; --blue-line:#b9c9d8; --gray:#a2a79f; --btn-ink:#ffffff; }
+  /* Palette B: Slate. Muted blue-gray with a teal-green accent. */
+  :root[data-pal="slate"] {
+    --bg:#e9ecf0; --panel:#f8f9fb; --nav:#f0f2f5; --ink:#262b33; --muted:#6f7886; --line:#d9dee5;
+    --green:#4f8785; --green-soft:#dfebea; --green-ink:#336563;
+    --amber:#957a4d; --amber-soft:#efe8d8; --red:#97575d; --red-soft:#efdfe0;
+    --blue:#5a74a0; --blue-soft:#e0e6f1; --blue-line:#b8c4dc; --gray:#a1a8b3; --btn-ink:#ffffff; }
+  /* Palette C: Sand. Warm paper with an olive accent. */
+  :root[data-pal="sand"] {
+    --bg:#f1ede5; --panel:#fcfaf6; --nav:#f6f2ea; --ink:#33302a; --muted:#8a8377; --line:#e4ddd0;
+    --green:#6d8c63; --green-soft:#e6ecdc; --green-ink:#4b6a42;
+    --amber:#a9823f; --amber-soft:#f3e8cf; --red:#a2574b; --red-soft:#f1dfd9;
+    --blue:#6580a0; --blue-soft:#e4e9ef; --blue-line:#bfcbd8; --gray:#aaa395; --btn-ink:#ffffff; }
+
+  * { box-sizing:border-box; }
+  body { margin:0; font:15px/1.5 -apple-system, "Segoe UI", Roboto, sans-serif; color:var(--ink); background:var(--bg); }
+  .pal-bar { display:flex; gap:8px; align-items:center; padding:8px 12px; margin:8px; background:var(--panel); border:1px solid var(--line); border-radius:8px; }
+  .pal-bar b { margin-right:6px; }
+  .pal-btn { padding:5px 12px; border:1px solid var(--line); border-radius:6px; background:#fff; cursor:pointer; font:inherit; }
+  .pal-btn.selected, .pal-btn.on { outline:2px solid var(--green); }
+  .sw { display:inline-block; width:11px; height:11px; border-radius:50%; margin-right:4px; vertical-align:-1px; }
+  .app { display:grid; grid-template-rows:auto 1fr; height:760px; margin:8px; border:1px solid var(--line); border-radius:8px; overflow:hidden; background:var(--panel); }
+
+  /* top bar */
+  .topbar { display:flex; align-items:center; gap:18px; padding:10px 16px; border-bottom:1px solid var(--line); background:var(--panel); }
+  .brand { font-weight:700; white-space:nowrap; font-size:16px; }
+  .charts { display:flex; gap:14px; align-items:center; }
+  .chart { display:flex; flex-direction:column; gap:2px; }
+  .chart .cap { font-size:11.5px; color:var(--muted); display:flex; justify-content:space-between; width:270px; }
+  .chart svg { display:block; background:var(--nav); border:1px solid var(--line); border-radius:4px; }
+  .controls { display:flex; gap:11px; align-items:flex-end; margin-left:auto; flex-wrap:wrap; justify-content:flex-end; }
+  .ctl { display:flex; flex-direction:column; gap:2px; }
+  .ctl label { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }
+  select, input[type=text], input[type=date] { font:inherit; font-size:14px; padding:5px 7px; border:1px solid var(--line); border-radius:5px; background:var(--panel); color:var(--ink); }
+  .seg { display:inline-flex; border:1px solid var(--line); border-radius:5px; overflow:hidden; font-size:14px; }
+  .seg span { padding:5px 11px; background:var(--panel); border-right:1px solid var(--line); }
+  .seg span:last-child { border-right:none; }
+  .seg span.on { background:var(--green); color:var(--btn-ink); }
+  .mine { outline:2px dashed #cfa64c; outline-offset:2px; }
+
+  /* body */
+  .body { display:grid; grid-template-columns:370px 1fr; min-height:0; }
+  .nav { border-right:1px solid var(--line); overflow-y:auto; background:var(--nav); padding:10px; display:flex; flex-direction:column; gap:8px; }
+  .nav-head { font-size:12.5px; color:var(--muted); padding:2px 4px; display:flex; justify-content:space-between; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:10px 12px; position:relative; }
+  .card.active { border-color:var(--green); box-shadow:0 0 0 2px var(--green-soft); }
+  .card .t { font-weight:600; font-size:15px; padding-right:52px; line-height:1.35; }
+  .card .c { color:var(--muted); font-size:13.5px; margin-top:1px; }
+  .card .row { display:flex; gap:6px; margin-top:7px; align-items:center; flex-wrap:wrap; }
+  .pill { font-size:12.5px; border-radius:11px; padding:1px 8px; background:var(--line); color:var(--ink); white-space:nowrap; }
+  .pill.s { background:var(--green-soft); color:var(--green-ink); font-weight:600; }
+  .pill.boost { background:var(--blue-soft); color:var(--blue); font-weight:600; }
+  .pill.warn { background:var(--amber-soft); color:var(--amber); }
+  .card .when { position:absolute; right:12px; top:10px; font-size:12.5px; color:var(--muted); }
+
+  .main { overflow-y:auto; padding:18px 24px 34px; }
+  h1 { font-size:24px; margin:0 0 3px; line-height:1.25; }
+  .sub { color:var(--muted); margin-bottom:10px; }
+  .head-row { display:flex; gap:9px; align-items:center; flex-wrap:wrap; margin:8px 0 12px; }
+  .btn { display:inline-block; padding:7px 14px; border-radius:6px; border:1px solid var(--line); background:var(--panel); font-weight:600; font-size:14.5px; }
+  .btn.primary { background:var(--green); border-color:var(--green); color:var(--btn-ink); }
+  .banner { background:var(--blue-soft); border:1px solid var(--blue-line); border-radius:8px; padding:10px 14px; margin:10px 0 14px; color:var(--ink); }
+  h2 { font-size:13px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); margin:22px 0 8px; border-bottom:1px solid var(--line); padding-bottom:4px; }
+  .scores { display:grid; grid-template-columns:repeat(2, 1fr); gap:12px; }
+  .score { border:1px solid var(--line); border-radius:8px; padding:10px 12px; background:var(--panel); }
+  .score .big { font-size:32px; font-weight:700; color:var(--green); line-height:1.1; }
+  .score .mname { font-size:13px; color:var(--muted); }
+  .bars { margin-top:8px; display:grid; grid-template-columns:130px 1fr 48px; gap:4px 8px; font-size:13px; align-items:center; }
+  .bar { height:7px; background:var(--line); border-radius:4px; overflow:hidden; } .bar i { display:block; height:100%; background:var(--green); }
+  .skills { display:grid; grid-template-columns:repeat(2, 1fr); gap:12px; }
+  .skillbox { border:1px solid var(--line); border-radius:8px; padding:10px 12px; background:var(--panel); }
+  .skillbox h3 { font-size:14px; margin:0 0 8px; }
+  .grp { margin:6px 0; } .grp b { font-size:12px; color:var(--muted); display:block; margin-bottom:3px; font-weight:600; }
+  .chip { display:inline-block; margin:2px 4px 2px 0; padding:2px 9px; border-radius:11px; font-size:13px; }
+  .chip.y { background:var(--green-soft); color:var(--green-ink); } .chip.sim { background:var(--amber-soft); color:var(--amber); } .chip.no { background:var(--red-soft); color:var(--red); }
+  .boostbox { border:1px solid var(--blue-line); background:var(--blue-soft); border-radius:8px; padding:12px 14px; }
+  .boostbox ul { margin:6px 0 8px 20px; padding:0; } .boostbox li { margin:4px 0; }
+  .jd { white-space:pre-wrap; background:var(--nav); border:1px solid var(--line); border-radius:8px; padding:12px 14px; max-height:170px; overflow:hidden; }
+  .mine-panel { background:var(--panel); border:1px dashed #cfa64c; border-radius:8px; padding:10px 14px; margin:8px; font-size:14px; }
+  .mine-panel ul { margin:5px 0 0 20px; padding:0; }
+  .note { background:var(--amber-soft); border:1px solid #e1cf9d; color:#5f4b1d; padding:9px 14px; margin:8px; border-radius:8px; font-size:14px; }
+</style>
+<script>
+  function setPal(name, el) {
+    document.documentElement.setAttribute('data-pal', name);
+    document.querySelectorAll('.pal-btn').forEach(function (b) { b.classList.remove('on'); });
+    el.classList.add('on');
+  }
+</script>
+</head>
+<body>
+
+<div class="pal-bar">
+  <b>Palette:</b>
+  <button class="pal-btn on" data-choice="sage" onclick="setPal('sage', this); toggleSelect(this)"><span class="sw" style="background:#5d8a6b"></span>A Sage</button>
+  <button class="pal-btn" data-choice="slate" onclick="setPal('slate', this); toggleSelect(this)"><span class="sw" style="background:#4f8785"></span>B Slate</button>
+  <button class="pal-btn" data-choice="sand" onclick="setPal('sand', this); toggleSelect(this)"><span class="sw" style="background:#6d8c63"></span>C Sand</button>
+  <span style="color:var(--muted);margin-left:8px">Click to switch the whole page. Font is about 15 percent bigger than v1.</span>
+</div>
+
+<div class="app">
+  <div class="topbar">
+    <div class="brand">Job Pipeline</div>
+
+    <div class="charts">
+      <div class="chart">
+        <div class="cap"><span><b style="color:var(--green)">qwen3.5:9b</b> score by job</span><span>avg 82.7 &middot; 25 jobs</span></div>
+        <svg width="270" height="38" viewBox="0 0 260 34" preserveAspectRatio="none">
+          <line x1="0" y1="9.4" x2="260" y2="9.4" style="stroke:var(--gray)" stroke-width="1" stroke-dasharray="3 3"/>
+          <polyline fill="none" style="stroke:var(--green)" stroke-width="1.7" points="0.0,6.7 10.8,10.1 21.7,11.9 32.5,12.3 43.3,7.6 54.2,12.3 65.0,5.4 75.8,7.6 86.7,10.1 97.5,6.7 108.3,8.4 119.2,5.0 130.0,11.9 140.8,17.4 151.7,2.0 162.5,11.4 173.3,10.6 184.2,10.1 195.0,11.0 205.8,7.6 216.7,8.0 227.5,10.1 238.3,13.1 249.2,8.0 260.0,10.1"/>
+        </svg>
+      </div>
+      <div class="chart">
+        <div class="cap"><span><b style="color:var(--green)">gemma4:e4b</b> score by job</span><span>avg 77.3 &middot; 25 jobs</span></div>
+        <svg width="270" height="38" viewBox="0 0 260 34" preserveAspectRatio="none">
+          <line x1="0" y1="11.7" x2="260" y2="11.7" style="stroke:var(--gray)" stroke-width="1" stroke-dasharray="3 3"/>
+          <polyline fill="none" style="stroke:var(--green)" stroke-width="1.7" points="0.0,14.4 10.8,13.6 21.7,9.3 32.5,14.4 43.3,8.9 54.2,14.0 65.0,17.4 75.8,13.1 86.7,9.3 97.5,14.4 108.3,31.1 119.2,5.0 130.0,5.4 140.8,14.9 151.7,4.1 162.5,11.0 173.3,5.9 184.2,19.1 195.0,5.9 205.8,5.4 216.7,11.9 227.5,11.4 238.3,15.3 249.2,5.9 260.0,11.9"/>
+        </svg>
+      </div>
+    </div>
+
+    <div class="controls">
+      <div class="ctl"><label>Time frame</label><span class="seg"><span class="on">Today</span><span>Yesterday</span><span>From date</span></span></div>
+      <div class="ctl"><label>From</label><input type="date" value="2026-11-04" disabled style="width:132px"></div>
+      <div class="ctl"><label>Sort</label><span class="seg"><span class="on">Most scored</span><span>Most recent</span></span></div>
+      <div class="ctl"><label>Show</label>
+        <select><option>Passed filter (16)</option><option>All (25)</option><option>Rejected (9)</option><option>Flagged (6)</option><option>With boost plan (5)</option></select></div>
+      <div class="ctl mine"><label>Score model</label><select><option>qwen3.5:9b (ranks)</option><option>gemma4:e4b</option><option>Average of both</option></select></div>
+      <div class="ctl mine"><label>Status</label><select><option>Any</option><option>New</option><option>Applied</option><option>Skipped</option></select></div>
+      <div class="ctl mine"><label>Search</label><input type="text" placeholder="title, company, skill" style="width:140px"></div>
+    </div>
+  </div>
+
+  <div class="body">
+    <div class="nav">
+      <div class="nav-head"><span>16 jobs &middot; most scored</span><span>scroll</span></div>
+
+      <div class="card"><div class="when">1h ago</div><div class="t">Morningstar Development Program: Associate Software Engineer</div><div class="c">Morningstar &middot; Chicago, IL</div>
+        <div class="row"><span class="pill s">9B 100</span><span class="pill">Gemma 95</span><span class="pill boost">boost</span></div></div>
+      <div class="card"><div class="when">1h ago</div><div class="t">Junior AI and Automation Engineer</div><div class="c">Myriad360 &middot; Remote</div>
+        <div class="row"><span class="pill s">9B 92</span><span class="pill">Gemma 64</span><span class="pill boost">boost</span><span class="pill warn mine">models differ 28</span></div></div>
+      <div class="card active"><div class="when">33m ago</div><div class="t">Associate Software Developer (AI)</div><div class="c">Precisely &middot; Tempe, AZ &middot; Remote</div>
+        <div class="row"><span class="pill s">9B 89</span><span class="pill">Gemma 71</span><span class="pill boost">boost</span></div></div>
+      <div class="card"><div class="when">14h ago</div><div class="t">AI Engineer</div><div class="c">Entravision &middot; Remote</div>
+        <div class="row"><span class="pill s">9B 87</span><span class="pill">Gemma 92</span><span class="pill boost">boost</span></div></div>
+      <div class="card"><div class="when">1h ago</div><div class="t">Generative AI Engineer</div><div class="c">Remolity &middot; Remote</div>
+        <div class="row"><span class="pill s">9B 87</span><span class="pill">Gemma 74</span><span class="pill boost">boost</span></div></div>
+      <div class="card"><div class="when">20h ago</div><div class="t">Software Engineer</div><div class="c">Mintive &middot; Remote</div>
+        <div class="row"><span class="pill s">9B 86</span><span class="pill">Gemma 77</span></div></div>
+      <div class="card"><div class="when">20h ago</div><div class="t">Software Engineer, Agents</div><div class="c">Standard Template Labs &middot; Hybrid</div>
+        <div class="row"><span class="pill s">9B 86</span><span class="pill">Gemma 91</span></div></div>
+      <div class="card"><div class="when">22h ago</div><div class="t">Software Engineer, Agent Delivery</div><div class="c">Teli Labs &middot; Remote</div>
+        <div class="row"><span class="pill s">9B 81</span><span class="pill">Gemma 78</span></div></div>
+      <div class="card"><div class="when">18m ago</div><div class="t">Forward Deployed Engineer</div><div class="c">Zetta2 &middot; Remote</div>
+        <div class="row"><span class="pill s">9B 79</span><span class="pill">Gemma 91</span><span class="pill warn">no apply link</span></div></div>
+    </div>
+
+    <div class="main">
+      <h1>Associate Software Developer (AI)</h1>
+      <div class="sub">Precisely &middot; Tempe, AZ &middot; Remote &middot; posted 33 minutes ago &middot; passed the filter</div>
+      <div class="head-row">
+        <span class="btn primary">Apply &#8599;</span>
+        <span class="btn">LinkedIn &#8599;</span>
+        <span class="pill boost" style="font-size:13.5px;padding:3px 10px">&#9733; Boost plan available</span>
+        <span class="pill s" style="font-size:13.5px;padding:3px 10px">9B 89</span>
+        <span class="pill" style="font-size:13.5px;padding:3px 10px">Gemma 71</span>
+        <span class="mine btn" style="font-weight:500">Mark applied</span>
+        <span class="mine btn" style="font-weight:500">Skip</span>
+        <span class="mine pill warn">sponsorship: not mentioned</span>
+        <span class="mine pill">clearance: no</span>
+      </div>
+
+      <div class="banner"><b>Boost:</b> add Pydantic validation and pytest unit tests to Conduit (about 12 h), and add TypeScript and Pydantic to your skills line (your repos already show them). Details below the skills.</div>
+
+      <h2>Summary</h2>
+      <div><b>qwen3.5:9b</b> Precisely is a global leader in data quality and location intelligence seeking an Associate Software Developer (AI) to build scalable AI-enabled applications. Entry level, at least 1 year of experience asked, 100% remote in the US.</div>
+      <div style="margin-top:6px;color:var(--muted)"><b>gemma4:e4b</b> Precisely is building AI-first products. The role is entry level, focused on learning and contributing under guidance.</div>
+
+      <h2>Scores</h2>
+      <div class="scores">
+        <div class="score"><div class="mname">qwen3.5:9b</div><div class="big">89</div>
+          <div class="bars">
+            <span>Required skills</span><div class="bar"><i style="width:90%"></i></div><span>36/40</span>
+            <span>Preferred skills</span><div class="bar"><i style="width:86%"></i></div><span>8.6/10</span>
+            <span>Learnability</span><div class="bar"><i style="width:75%"></i></div><span>7.5/10</span>
+            <span>Experience fit</span><div class="bar"><i style="width:85%"></i></div><span>17/20</span>
+            <span>Role alignment</span><div class="bar"><i style="width:100%"></i></div><span>20/20</span>
+          </div></div>
+        <div class="score"><div class="mname">gemma4:e4b</div><div class="big">71</div>
+          <div class="bars">
+            <span>Required skills</span><div class="bar"><i style="width:80%"></i></div><span>32/40</span>
+            <span>Preferred skills</span><div class="bar"><i style="width:62%"></i></div><span>6.2/10</span>
+            <span>Learnability</span><div class="bar"><i style="width:50%"></i></div><span>5/10</span>
+            <span>Experience fit</span><div class="bar"><i style="width:65%"></i></div><span>13/20</span>
+            <span>Role alignment</span><div class="bar"><i style="width:75%"></i></div><span>15/20</span>
+          </div></div>
+      </div>
+
+      <h2>Skills (what you have first, then similar, then missing)</h2>
+      <div class="skills">
+        <div class="skillbox"><h3>qwen3.5:9b</h3>
+          <div class="grp"><b>REQUIRED &middot; you have</b><span class="chip y">Python/TypeScript/Java/C#/Go (any one)</span><span class="chip y">REST APIs</span><span class="chip y">FastAPI/Django/Flask/... (any one)</span><span class="chip y">Object-oriented programming</span></div>
+          <div class="grp"><b>REQUIRED &middot; similar</b><span style="color:var(--muted)">none</span></div>
+          <div class="grp"><b>REQUIRED &middot; missing</b><span class="chip no">Pydantic</span></div>
+          <div class="grp"><b>PREFERRED &middot; you have</b><span class="chip y">Web development</span><span class="chip y">Git</span><span class="chip y">Docker</span><span class="chip y">CI/CD tooling</span></div>
+          <div class="grp"><b>PREFERRED &middot; similar</b><span class="chip sim">Data engineering concepts</span><span class="chip sim">Cloud platforms</span></div>
+          <div class="grp"><b>PREFERRED &middot; missing</b><span class="chip no">Unit/integration testing</span></div>
+        </div>
+        <div class="skillbox"><h3>gemma4:e4b</h3>
+          <div class="grp"><b>REQUIRED &middot; you have</b><span class="chip y">Python</span><span class="chip y">FastAPI</span><span class="chip y">REST APIs</span><span class="chip y">CI/CD</span></div>
+          <div class="grp"><b>REQUIRED &middot; similar</b><span style="color:var(--muted)">none</span></div>
+          <div class="grp"><b>REQUIRED &middot; missing</b><span class="chip no">Object-oriented programming</span></div>
+          <div class="grp"><b>PREFERRED &middot; you have</b><span class="chip y">LLMs</span><span class="chip y">Docker</span><span class="chip y">GCP</span></div>
+          <div class="grp"><b>PREFERRED &middot; similar</b><span class="chip sim">TypeScript</span><span class="chip sim">Java</span></div>
+          <div class="grp"><b>PREFERRED &middot; missing</b><span class="chip no">C#</span><span class="chip no">Go</span><span class="chip no">Pydantic</span></div>
+        </div>
+      </div>
+
+      <h2>Boost</h2>
+      <div class="boostbox">
+        <b>Best move:</b> add Pydantic validation and unit tests to Conduit; it already has FastAPI and Redis, so the addition is natural. This covers two required gaps.
+        <ul>
+          <li><b>Extend Conduit</b> (about 12 h): Pydantic models for request/response validation, pytest unit tests for the rate limiter and budget logic, GitHub Actions workflow. <i>Pathway: 1. check the repo for existing models, 2. define models, 3. apply to endpoints, 4. unit tests, 5. CI.</i></li>
+          <li><b>Add to your resume now</b> (your repos already show them): TypeScript (sundial, Solwards), Pydantic (BrokeNoMore).</li>
+          <li><b>Rewordings:</b> 1 clean, 3 risky (shown separately with the reasons).</li>
+        </ul>
+        <span class="mine btn" style="font-weight:500">Copy resume bullet</span> <span class="mine btn" style="font-weight:500">Open full plan</span>
+      </div>
+
+      <h2>Job description</h2>
+      <div class="jd">About the role. We are seeking a passionate Associate Software Developer (AI) to join our engineering team building scalable applications. You will work under the guidance of experienced developers, participate in real projects, and build your skills with modern languages, frameworks, and practices.
+
+What You Will Do: assist in designing, developing, and maintaining AI-enabled applications using Python, TypeScript, Java, C#, or Go. Learn to use Pydantic for defining and validating data models. Support testing and CI/CD processes...</div>
+      <div style="text-align:center;color:var(--muted);margin-top:5px">show full description</div>
+    </div>
+  </div>
+</div>
+
+<div class="mine-panel"><b>Dashed amber outline = added by me, not asked for:</b> score-model selector, status (new / applied / skipped) with Mark applied and Skip buttons, search, flag badges (sponsorship, clearance, models disagree, no apply link), and copy buttons for resume bullets. Still not drawn: a daily rollup view, rejected-job reasons, keyboard navigation.</div>
+
+</body>
+</html>

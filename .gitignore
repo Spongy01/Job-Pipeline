@@ -5,3 +5,4 @@ jobs.json.bak
 runs/
 __pycache__/
 .venv/
+.superpowers/
