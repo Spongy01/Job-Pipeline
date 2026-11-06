@@ -96,3 +96,5 @@ table.tally th { color:var(--muted); font-weight:600; font-size:12px; text-trans
 .card.fresh { border-color:var(--green); box-shadow:0 0 0 1px var(--green); }
 
 .years { font-size:15px; margin:0 0 12px; }
+
+.btn.warn { border-color:#d9b8b3; color:#9b3d33; }

@@ -18,6 +18,7 @@
   var polling = false;
   var freshIds = {};      // job ids that arrived while the page was open and were not opened yet
   var rollupMissing = false;
+  var boostActive = false; // the open job has a boost request that is waiting or running
 
   // ---------- small helpers ----------
   function loadPrefs() {
@@ -285,6 +286,7 @@
   function pill(text, cls) { return h("span", { class: "pill" + (cls ? " " + cls : ""), text: text }); }
 
   function renderJob(job) {
+    boostActive = false;
     var models = Object.keys(job.enrichment || {}).sort();
     var wrap = h("div");
     wrap.appendChild(h("h1", { text: job.posting_name || "(untitled)" }));
@@ -335,12 +337,27 @@
     else row.appendChild(pill("no apply link", "warn"));
     if (safeUrl(job.linkedin_url) && external) row.appendChild(h("a", { class: "btn", href: job.linkedin_url, target: "_blank", rel: "noopener noreferrer", text: "LinkedIn ↗" }));
     if (job.boost && job.boost.plan) row.appendChild(pill("★ Boost plan available", "boost"));
+    else row.appendChild(boostControl(job));
     models.forEach(function (m) { var e = job.enrichment[m]; if (e.ok) row.appendChild(pill(shortModel(m) + " " + e.data.score, m === state.model ? "s" : "")); });
     ["applied", "skipped"].forEach(function (value) {
       row.appendChild(h("button", { class: "btn small" + (job.user_status === value ? " on" : ""), text: job.user_status === value ? "Undo " + value : (value === "applied" ? "Mark applied" : "Skip"),
         onclick: function () { setStatus(job, job.user_status === value ? null : value); } }));
     });
     return row;
+  }
+  // "Give me boost": asks the server to plan this one job. States come from job.boost_request.
+  function boostControl(job) {
+    var request = job.boost_request;
+    if (request && request.state === "waiting") { boostActive = true; return pill("Boost requested, waiting to start", "boost"); }
+    if (request && request.state === "running") { boostActive = true; return pill("Boost: planning this job…", "boost"); }
+    var failed = request && request.state === "failed";
+    return h("button", { class: "btn small" + (failed ? " warn" : ""), title: failed ? "Last try failed: " + (request.error || "unknown error") : "Plan resume and project changes for this job",
+      text: failed ? "Boost failed, try again" : "Give me boost", onclick: function () { requestBoost(job); } });
+  }
+  function requestBoost(job) {
+    api("/api/job/" + encodeURIComponent(job.id) + "/boost", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })
+      .then(function () { toast("Boost requested"); return loadMain(true); })
+      .catch(function (err) { toast("Could not request boost: " + err.message); });
   }
   function setStatus(job, status) {
     api("/api/job/" + encodeURIComponent(job.id) + "/status", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: status }) })
@@ -527,7 +544,7 @@
       var ids = view.cards.map(function (c) { return c.id; });
       if (selected !== "rollup" && ids.indexOf(selected) === -1) { selected = ids.length ? ids[0] : null; markActive(); return loadMain(); }
       markActive();
-      if (selected === "rollup" ? rollupMissing : cardSignature(selected) !== beforeSignature) return loadMain(true);
+      if (selected === "rollup" ? rollupMissing : (boostActive || cardSignature(selected) !== beforeSignature)) return loadMain(true);
     }).catch(function () { /* keep what is on screen; try again on the next tick */ })
       .then(function () { polling = false; });
   }

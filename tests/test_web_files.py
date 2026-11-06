@@ -51,6 +51,12 @@ class WebFilesTests(unittest.TestCase):
         # placed right after the title line, before the buttons row
         self.assertLess(js.index("yearsLine(job)"), js.index("wrap.appendChild(headRow(job, models))"))
 
+    def test_give_me_boost_button_and_states(self):
+        js = self.read("app.js")
+        self.assertIn("Give me boost", js)
+        self.assertIn("/boost", js)
+        self.assertIn("boost_request", js)
+
     def test_no_dependencies_or_build_step(self):
         self.assertFalse((WEB / "package.json").exists())
         self.assertFalse(list(WEB.glob("node_modules")))
