@@ -57,6 +57,13 @@ class WebFilesTests(unittest.TestCase):
         self.assertIn("/boost", js)
         self.assertIn("boost_request", js)
 
+    def test_top_bar_shows_run_progress(self):
+        html, js = self.read("index.html"), self.read("app.js")
+        self.assertIn('id="progress"', html)
+        self.assertIn("/api/progress", js)
+        for word in ("Scraped", "Processed", "Waiting"):
+            self.assertIn(word, js)
+
     def test_no_dependencies_or_build_step(self):
         self.assertFalse((WEB / "package.json").exists())
         self.assertFalse(list(WEB.glob("node_modules")))

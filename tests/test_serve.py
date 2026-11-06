@@ -12,6 +12,7 @@ SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 import jobslock  # noqa: E402
 import boost_requests  # noqa: E402
+import jobqueue  # noqa: E402
 import serve  # noqa: E402
 
 M9, MG = "qwen3.5:9b", "gemma4:e4b"
@@ -258,6 +259,63 @@ class BoostRequestTests(ServeTestCase):
         return json.loads((self.tmp / "jobs.json").read_text())
 
 
+class ProgressTests(ServeTestCase):
+    def start_run(self, stopping=False, raw=7, pending=0, processing=0, failed=0):
+        jobqueue.begin_run(self.tmp, TODAY)
+        if stopping:
+            jobqueue.set_stopping(self.tmp)
+        (self.tmp / "runs" / TODAY).mkdir(parents=True, exist_ok=True)
+        (self.tmp / "runs" / TODAY / "raw.json").write_text(json.dumps([{"id": str(i)} for i in range(raw)]))
+        for state, n in (("pending", pending), ("processing", processing), ("failed", failed)):
+            d = self.tmp / "queue" / state
+            d.mkdir(parents=True, exist_ok=True)
+            for i in range(n):
+                (d / ("%s%d.json" % (state[0], i))).write_text("{}")
+
+    def progress(self):
+        status, body = self.get_json("/api/progress")
+        self.assertEqual(status, 200)
+        return body
+
+    def test_no_run_means_inactive(self):
+        self.assertEqual(self.progress(), {"active": False})
+
+    def test_counts_for_a_run_in_progress(self):
+        self.start_run(raw=7, pending=2, processing=1, failed=1)
+        p = self.progress()
+        self.assertEqual((p["active"], p["date"], p["scraped"], p["processed"], p["waiting"], p["processing"], p["failed"]),
+                         (True, TODAY, 7, 3, 2, 1, 1))  # 3 jobs in jobs.json carry this run date
+        self.assertEqual(p["phase"], "no_worker")  # nothing holds the worker lock in this test
+
+    def test_phase_follows_the_stop_flag_and_the_queue(self):
+        import jobslock
+        with jobslock.worker_lock(self.tmp):  # a worker is running
+            self.start_run(pending=1)
+            self.assertEqual(self.progress()["phase"], "receiving")
+            jobqueue.set_stopping(self.tmp)
+            self.assertEqual(self.progress()["phase"], "finishing")
+            (self.tmp / "queue" / "pending" / "p0.json").unlink()
+            self.assertEqual(self.progress()["phase"], "final_steps")
+
+    def test_progress_does_not_block_a_worker_starting(self):
+        import jobslock
+        self.start_run()
+        self.progress()
+        with jobslock.worker_lock(self.tmp):  # the probe released its lock again
+            pass
+
+    def test_missing_raw_json_counts_as_zero(self):
+        jobqueue.begin_run(self.tmp, TODAY)
+        self.assertEqual(self.progress()["scraped"], 0)
+
+    def test_corrupt_run_json_is_an_error_not_inactive(self):
+        (self.tmp / "queue").mkdir()
+        (self.tmp / "queue" / "run.json").write_text("{nope")
+        status, body = self.get_json("/api/progress")
+        self.assertEqual(status, 500)
+        self.assertIn("run.json", body["error"])
+
+
 class ErrorTests(ServeTestCase):
     def test_corrupt_jobs_json_gives_500_with_message_not_empty_list(self):
         (self.tmp / "jobs.json").write_text("[{corrupt")
@@ -284,7 +342,7 @@ class StartupTests(unittest.TestCase):
         tmp = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, tmp, True)
         (tmp / "scripts").mkdir()
-        for name in ("serve.py", "jobs_query.py", "clean.py", "jobslock.py", "boost_requests.py"):
+        for name in ("serve.py", "jobs_query.py", "clean.py", "jobslock.py", "boost_requests.py", "jobqueue.py"):
             shutil.copy(SCRIPTS / name, tmp / "scripts" / name)
         (tmp / "web").mkdir()
         taken = socket.socket()
@@ -303,7 +361,7 @@ class StartupTests(unittest.TestCase):
         tmp = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, tmp, True)
         (tmp / "scripts").mkdir()
-        for name in ("serve.py", "jobs_query.py", "clean.py", "jobslock.py", "boost_requests.py"):
+        for name in ("serve.py", "jobs_query.py", "clean.py", "jobslock.py", "boost_requests.py", "jobqueue.py"):
             shutil.copy(SCRIPTS / name, tmp / "scripts" / name)
         (tmp / "web").mkdir()
         (tmp / "jobs.json").write_text("[{corrupt")

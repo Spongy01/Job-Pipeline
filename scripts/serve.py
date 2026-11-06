@@ -9,6 +9,7 @@ A small local server for the jobs page. Standard library only, bound to 127.0.0.
                                   the left nav cards, graph series, counts (scripts/jobs_query.py)
   GET  /api/job/<id>              the full job record
   GET  /api/rollup/<date>         that day's boost rollup (rollups.json)
+  GET  /api/progress              the run in progress: scraped, processed, waiting, failed, phase (top bar)
   POST /api/job/<id>/status       {"status": "applied" | "skipped" | null}: changes user_status of that one
                                   job in jobs.json
   POST /api/job/<id>/boost        "Give me boost": saves a request in queue/boost_requests/ (never touches
@@ -32,7 +33,8 @@ from urllib.parse import parse_qs, unquote, urlsplit
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import jobs_query as jq  # noqa: E402
 import boost_requests  # noqa: E402
-from jobslock import jobs_lock  # noqa: E402
+import jobqueue  # noqa: E402
+from jobslock import AlreadyRunning, jobs_lock, worker_lock  # noqa: E402
 from clean import write_json_atomic  # noqa: E402
 from jobs_query import JobsError  # noqa: E402
 
@@ -89,6 +91,40 @@ class JobsStore:
             write_json_atomic(self.path, jobs)
             self._key = None
             return job["user_status"]
+
+    def progress(self):
+        """Where the current streaming run stands: {"active": False} when there is no run.json."""
+        try:
+            run = jobqueue.read_run(self.root)
+        except jobqueue.QueueError as e:
+            raise JobsError(str(e))
+        if run is None:
+            return {"active": False}
+        counts = jobqueue.counts(self.root)
+        scraped = 0
+        raw_path = self.root / "runs" / run["date"] / "raw.json"
+        if raw_path.exists():
+            try:
+                raw = json.loads(raw_path.read_text(encoding="utf-8"))
+                scraped = len(raw) if isinstance(raw, list) else 0
+            except (ValueError, UnicodeDecodeError) as e:
+                raise JobsError("raw.json for %s is not valid JSON (%s)" % (run["date"], e))
+        processed = sum(1 for j in self.jobs() if j.get("run_date") == run["date"])
+        try:
+            with worker_lock(self.root):  # taken and released at once: free means no worker is running
+                worker = False
+        except AlreadyRunning:
+            worker = True
+        waiting = counts["pending"] + counts["processing"]
+        if not worker:
+            phase = "no_worker"
+        elif run["stopping"]:
+            phase = "finishing" if waiting else "final_steps"
+        else:
+            phase = "receiving"
+        return {"active": True, "date": run["date"], "stopping": run["stopping"], "scraped": scraped, "processed": processed,
+                "waiting": counts["pending"], "processing": counts["processing"], "failed": counts["failed"],
+                "worker": worker, "phase": phase}
 
     def rollup(self, run_date):
         path = self.root / "rollups.json"
@@ -161,6 +197,8 @@ def make_handler(store, web_dir, quiet, today=None):
                 return self.send_static(unquote(path[len("/static/"):]))
             if path == "/api/view":
                 return self.send_json(200, self.view(query))
+            if path == "/api/progress":
+                return self.send_json(200, store.progress())
             m = re.fullmatch(r"/api/job/([^/]+)", path)
             if m:
                 job = store.get(unquote(m.group(1)))

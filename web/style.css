@@ -98,3 +98,10 @@ table.tally th { color:var(--muted); font-weight:600; font-size:12px; text-trans
 .years { font-size:15px; margin:0 0 12px; }
 
 .btn.warn { border-color:#d9b8b3; color:#9b3d33; }
+
+.progress { display:flex; flex-direction:column; gap:3px; min-width:230px; font-size:13px; }
+.progress .numbers { display:flex; gap:12px; flex-wrap:wrap; }
+.progress .bar { height:5px; border-radius:3px; background:var(--line); overflow:hidden; }
+.progress .fill { height:100%; background:var(--green); }
+.progress .phase { color:var(--muted); font-size:12px; }
+.progress .bad, .progress .phase.bad { color:#9b3d33; }
