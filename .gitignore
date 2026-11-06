@@ -1,12 +1,35 @@
+# macOS / editors
 .DS_Store
+.idea/
+.vscode/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+
+# Personal data: never commit these
 resume/
 jobs.json
 jobs.json.bak
-runs/
-__pycache__/
-.venv/
-.superpowers/
 rollups.json
+runs/
 queue/
+*.bak
+
+# Secrets and local settings
+.env
+.env.*
+*.pem
+*.key
+config.local.json
+
+# Runtime state and logs
 .jobs.lock
 .worker.lock
+*.log
+nohup.out
+
+# Tool scratch
+.superpowers/
