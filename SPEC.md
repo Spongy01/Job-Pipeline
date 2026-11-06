@@ -85,6 +85,10 @@ Models: `--models`, or else `models.enricher` in `config.json` (a model name or 
 side by side). The boost step uses `models.booster` (one model, default qwen3.5:9b; `--model` overrides). A bad value in
 `config.json` is an error; the scripts never write to `config.json`.
 
+Which jobs the boost step plans: `config.json` `"boost": {"type": "highest" | "all", "booster_count": N}`. `highest` (the default) plans the N best-scored
+passed jobs (`booster_count`, else the older `top_n`, else 5). `all` plans every passed job and ignores the count. `--top-n` on the
+command line overrides both. The rollup always covers all passed jobs.
+
 Reads `runs/<date>/clean.json`, the resume text from `config.json` `resume_path` (PDF, via
 pypdf), and the prompt `prompts/enrich/<version>.py`. Writes `runs/<date>/enriched.json`
 (or `--out-dir`). Closed jobs are skipped. Existing ok entries for the same model and prompt
@@ -308,3 +312,16 @@ page's status write all take it and re-read the file under it, so the worker and
 
 `web/app.js` fetches `/api/view` every 5 seconds while the tab is visible. A failed poll changes nothing. New cards get a green
 outline until opened. The open job, the scroll positions and the open description are left alone unless that job's own card changed.
+
+## "Give me boost" (scripts/boost_requests.py, serve.py, boost.py --job)
+
+A button on each job's page (shown when the job has no boost plan) asks for a plan for that one job, whatever its stage (a rejected job can be boosted too).
+
+| piece | what |
+|---|---|
+| `POST /api/job/<id>/boost` | needs `Content-Type: application/json`. Saves `queue/boost_requests/<id>.json` (`{id, run_date, state, requested_at, error?}`) and answers 202 `{id, state: "waiting"}`. A job that already has a plan answers 200 `{state: "done"}` and saves nothing. Unknown job: 404. It never writes `jobs.json` |
+| `GET /api/job/<id>` | adds `boost_request: {state, error?}` while a request exists. States: waiting, running, failed |
+| BoostRunner | a thread in `serve.py` that takes waiting requests one at a time and runs `.venv/bin/python scripts/boost.py <run date> --job <id>`. Success deletes the request; failure keeps it as `failed` with the last error line (the button then offers a retry). A request left `running` by a crash goes back to waiting when the server starts |
+| `boost.py <date> --job <id>` | plans only that job (`run(..., only=[id])`: no rollup and no `boost.md`, which describe the whole day), then runs the merge so the plan appears in `jobs.json`. Exits 3 while a worker is running (it holds `.worker.lock`), and the request stays waiting and is retried every 15 seconds; it also holds that lock while it plans, so a worker cannot start in the middle of it |
+
+The page polls while a request is waiting or running and shows the plan when it arrives. The page server must be restarted to pick this up.

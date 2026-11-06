@@ -274,6 +274,93 @@ class RunTests(BoostTestCase):
         self.assertEqual(boost.run(self.tmp, DATE, client=FakeClient(), resume_text=RESUME)["selected"], 2)
         self.assertEqual(boost.run(self.tmp, DATE, top_n=4, client=FakeClient(), resume_text=RESUME)["selected"], 4)
 
+    def boost_selected(self, boost_cfg, n_jobs=7, **kw):
+        self.setup_jobs([make_job(str(i), 50 + i) for i in range(1, n_jobs + 1)])
+        (self.tmp / "config.json").write_text(json.dumps({"resume_path": "x", "boost": boost_cfg}))
+        return boost.run(self.tmp, DATE, client=FakeClient(), resume_text=RESUME, **kw)["selected"]
+
+    def test_boost_type_all_plans_every_passed_job(self):
+        self.assertEqual(self.boost_selected({"type": "all"}), 7)
+
+    def test_boost_type_all_ignores_booster_count(self):
+        self.assertEqual(self.boost_selected({"type": "all", "booster_count": 2}), 7)
+
+    def test_boost_type_highest_uses_booster_count(self):
+        self.assertEqual(self.boost_selected({"type": "highest", "booster_count": 2}), 2)
+
+    def test_boost_type_highest_without_count_defaults_to_five(self):
+        self.assertEqual(self.boost_selected({"type": "highest"}), 5)
+
+    def test_no_boost_block_is_highest_five(self):
+        self.setup_jobs([make_job(str(i), 50 + i) for i in range(1, 8)])
+        (self.tmp / "config.json").write_text(json.dumps({"resume_path": "x"}))
+        self.assertEqual(boost.run(self.tmp, DATE, client=FakeClient(), resume_text=RESUME)["selected"], 5)
+
+    def test_cli_top_n_overrides_type_all(self):
+        self.assertEqual(self.boost_selected({"type": "all"}, top_n=3), 3)
+
+    def test_type_all_with_no_passed_jobs_selects_nothing(self):
+        self.setup_jobs([make_job("1")], passed=[], rejected=["1"])
+        (self.tmp / "config.json").write_text(json.dumps({"resume_path": "x", "boost": {"type": "all"}}))
+        summary = boost.run(self.tmp, DATE, client=FakeClient(), resume_text=RESUME)
+        self.assertEqual(summary["selected"], 0)
+
+    def test_bad_boost_config_is_an_error(self):
+        self.setup_jobs([make_job("1")])
+        for bad in ({"type": "some"}, {"type": "highest", "booster_count": 0}, {"type": "highest", "booster_count": "3"},
+                    {"type": "highest", "booster_count": True}, {"type": "highest", "booster_count": 2.5}, "all", ["all"]):
+            (self.tmp / "config.json").write_text(json.dumps({"resume_path": "x", "boost": bad}))
+            with self.assertRaises(boost.LLMError, msg=repr(bad)):
+                boost.run(self.tmp, DATE, client=FakeClient(), resume_text=RESUME)
+
+    def test_only_job_plans_just_that_job_even_if_rejected_and_skips_rollup_and_report(self):
+        self.setup_jobs([make_job("1", 90), make_job("2", 70), make_job("3", 60)], passed=["1", "2"], rejected=["3"])
+        summary = boost.run(self.tmp, DATE, only=["3"], client=FakeClient(), resume_text=RESUME)
+        self.assertEqual((summary["selected"], summary["done"], summary["rollup"]), (1, 1, "skipped"))
+        self.assertEqual(sorted(p.stem for p in (self.run_dir / "boost").glob("*.json")), ["3"])
+        self.assertFalse((self.run_dir / "boost_rollup.json").exists())
+        self.assertFalse((self.run_dir / "boost.md").exists())
+
+    def test_only_job_with_an_existing_plan_is_reused(self):
+        self.setup_jobs([make_job("1", 90)])
+        boost.run(self.tmp, DATE, only=["1"], client=FakeClient(), resume_text=RESUME)
+        again = FakeClient()
+        summary = boost.run(self.tmp, DATE, only=["1"], client=again, resume_text=RESUME)
+        self.assertEqual((summary["skipped_existing"], summary["done"]), (1, 0))
+        self.assertEqual(again.kinds().count("plan"), 0)
+
+    def test_only_unknown_job_selects_nothing(self):
+        self.setup_jobs([make_job("1")])
+        self.assertEqual(boost.run(self.tmp, DATE, only=["999"], client=FakeClient(), resume_text=RESUME)["selected"], 0)
+
+    def test_run_for_job_merges_the_plan_into_jobs_json(self):
+        self.setup_jobs([make_job("1", 90), make_job("2", 70)])
+        (self.tmp / "jobs.json").write_text(json.dumps([{**make_job("1", 90), "boost": None, "stage": "passed", "run_date": DATE,
+                                                         "user_status": None}]))
+        summary = boost.run_for_job(self.tmp, DATE, "1", client=FakeClient(), resume_text=RESUME)
+        self.assertEqual(summary["selected"], 1)
+        jobs = json.loads((self.tmp / "jobs.json").read_text())
+        self.assertTrue(jobs[0]["boost"]["ok"])
+        self.assertEqual(len(jobs), 2)  # the merge also brought in the rest of that day's run
+
+    def test_run_for_job_without_a_usable_score_is_an_error(self):
+        self.setup_jobs([make_job("1", enrichment={M9: {"ok": False, "error": "x"}})])
+        with self.assertRaises(boost.LLMError):
+            boost.run_for_job(self.tmp, DATE, "1", client=FakeClient(), resume_text=RESUME)
+
+    def test_job_cli_exits_3_while_a_worker_holds_the_lock(self):
+        import subprocess
+        sys.path.insert(0, str(PROJECT / "scripts"))
+        import jobslock
+        (self.tmp / "scripts").mkdir()
+        for f in (PROJECT / "scripts").glob("*.py"):
+            shutil.copy(f, self.tmp / "scripts" / f.name)
+        with jobslock.worker_lock(self.tmp):
+            r = subprocess.run([sys.executable, str(self.tmp / "scripts" / "boost.py"), DATE, "--job", "1"],
+                               capture_output=True, text=True, cwd="/", timeout=60)
+        self.assertEqual(r.returncode, 3, r.stderr)
+        self.assertIn("worker", r.stderr)
+
     def write_config(self, data):
         (self.tmp / "config.json").write_text(json.dumps({"resume_path": "x", **data}))
 

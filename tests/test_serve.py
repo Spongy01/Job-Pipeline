@@ -11,6 +11,7 @@ from pathlib import Path
 SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 import jobslock  # noqa: E402
+import boost_requests  # noqa: E402
 import serve  # noqa: E402
 
 M9, MG = "qwen3.5:9b", "gemma4:e4b"
@@ -212,6 +213,51 @@ class StatusTests(ServeTestCase):
         self.assertEqual(status, 413)
 
 
+class BoostRequestTests(ServeTestCase):
+    def post_boost(self, job_id, headers=None):
+        h = {"Content-Type": "application/json"}
+        h.update(headers if headers is not None else {})
+        return self.request("POST", "/api/job/%s/boost" % job_id, body="{}", headers=h)
+
+    def test_request_is_accepted_and_saved(self):
+        status, _, data = self.post_boost("2")
+        self.assertEqual(status, 202)
+        self.assertEqual(json.loads(data), {"id": "2", "state": "waiting"})
+        req = boost_requests.read(self.tmp, "2")
+        self.assertEqual((req["state"], req["run_date"]), ("waiting", TODAY))
+
+    def test_job_view_includes_the_request_state(self):
+        self.assertNotIn("boost_request", self.get_json("/api/job/2")[1])
+        self.post_boost("2")
+        self.assertEqual(self.get_json("/api/job/2")[1]["boost_request"], {"state": "waiting"})
+        boost_requests.set_state(self.tmp, "2", "failed", "boom")
+        self.assertEqual(self.get_json("/api/job/2")[1]["boost_request"], {"state": "failed", "error": "boom"})
+
+    def test_unknown_job_is_404_and_nothing_saved(self):
+        self.assertEqual(self.post_boost("999")[0], 404)
+        self.assertIsNone(boost_requests.read(self.tmp, "999") if (self.tmp / "queue").exists() else None)
+
+    def test_job_that_already_has_a_plan_is_not_requested_again(self):
+        jobs = self.jobs_on_disk()
+        jobs[1]["boost"] = {"ok": True, "plan": {"verdict": "v"}}
+        self.write_jobs(jobs)
+        status, _, data = self.post_boost("2")
+        self.assertEqual((status, json.loads(data)["state"]), (200, "done"))
+        self.assertFalse((self.tmp / "queue" / "boost_requests").exists())
+
+    def test_request_needs_json_content_type(self):
+        status, _, _ = self.request("POST", "/api/job/2/boost", body="{}", headers={"Content-Type": "text/plain"})
+        self.assertEqual(status, 415)
+
+    def test_request_does_not_touch_jobs_json(self):
+        before = (self.tmp / "jobs.json").read_text()
+        self.post_boost("2")
+        self.assertEqual((self.tmp / "jobs.json").read_text(), before)
+
+    def jobs_on_disk(self):
+        return json.loads((self.tmp / "jobs.json").read_text())
+
+
 class ErrorTests(ServeTestCase):
     def test_corrupt_jobs_json_gives_500_with_message_not_empty_list(self):
         (self.tmp / "jobs.json").write_text("[{corrupt")
@@ -238,7 +284,7 @@ class StartupTests(unittest.TestCase):
         tmp = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, tmp, True)
         (tmp / "scripts").mkdir()
-        for name in ("serve.py", "jobs_query.py", "clean.py", "jobslock.py"):
+        for name in ("serve.py", "jobs_query.py", "clean.py", "jobslock.py", "boost_requests.py"):
             shutil.copy(SCRIPTS / name, tmp / "scripts" / name)
         (tmp / "web").mkdir()
         taken = socket.socket()
@@ -257,7 +303,7 @@ class StartupTests(unittest.TestCase):
         tmp = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, tmp, True)
         (tmp / "scripts").mkdir()
-        for name in ("serve.py", "jobs_query.py", "clean.py", "jobslock.py"):
+        for name in ("serve.py", "jobs_query.py", "clean.py", "jobslock.py", "boost_requests.py"):
             shutil.copy(SCRIPTS / name, tmp / "scripts" / name)
         (tmp / "web").mkdir()
         (tmp / "jobs.json").write_text("[{corrupt")

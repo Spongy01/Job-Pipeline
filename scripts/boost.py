@@ -6,7 +6,8 @@ local Ollama model, a plan for each (rewordings, project extensions, a new proje
 plus a daily rollup of the skills that keep coming up as missing.
 
 Reads  runs/<date>/filtered.json, runs/<date>/enriched.json, config.json (resume_path, "models":
-       {"booster": ...} and an optional "boost" block {"top_n": 5}), resume/projects.md.
+       {"booster": ...} and an optional "boost" block {"type": "highest" | "all", "booster_count": 5}),
+       resume/projects.md.
 Writes runs/<date>/boost/<job_id>.json, runs/<date>/boost/specs/*.md,
        runs/<date>/boost_rollup.json, runs/<date>/boost.md.
 Never changes any input file. Prints one JSON line of counts; progress goes to stderr.
@@ -14,7 +15,7 @@ Exit is non-zero if an input is missing or corrupt, the model is not downloaded,
 plan or the rollup failed.
 
 Options:
-  --top-n N            jobs to plan (default: config boost.top_n, else 5)
+  --top-n N            jobs to plan (default: config boost.type/booster_count: the best 5, or all passed jobs)
   --model M            Ollama model (default: config models.booster, else qwen3.5:9b)
   --prompt-version V   prompts/boost/<V>.py (default v1)
   --force              redo plans and the rollup that already exist for this prompt version
@@ -198,13 +199,37 @@ def reusable(path, version, force):
     return record if record.get("ok") and record.get("prompt_version") == version else None
 
 
+def resolve_selection(boost_cfg, cli_top_n=None):
+    """How many jobs get a plan: an int, or None for "all passed jobs".
+
+    config.json "boost": {"type": "highest" | "all", "booster_count": N}. type "highest" (the default)
+    plans the N best-scored passed jobs (booster_count, else the older top_n, else 5); "all" plans every
+    passed job and ignores the count. A count given on the command line (--top-n) wins over the config.
+    """
+    if cli_top_n:
+        return cli_top_n
+    if not isinstance(boost_cfg, dict):
+        raise LLMError('config.json "boost" must be an object like {"type": "highest", "booster_count": 5}')
+    kind = boost_cfg.get("type", "highest")
+    if kind not in ("highest", "all"):
+        raise LLMError('config.json boost.type must be "highest" or "all", got %r' % (kind,))
+    if kind == "all":
+        return None
+    count = boost_cfg.get("booster_count", boost_cfg.get("top_n", DEFAULT_TOP_N))
+    if isinstance(count, bool) or not isinstance(count, int) or count < 1:
+        raise LLMError("config.json boost.booster_count must be a whole number of 1 or more, got %r" % (count,))
+    return count
+
+
 def run(root, run_date, top_n=None, model=None, prompt_version="v1", force=False, num_ctx=DEFAULT_NUM_CTX,
-        retries=1, think=False, client=None, resume_text=None, unload=True, log=lambda m: None):
+        retries=1, think=False, client=None, resume_text=None, unload=True, log=lambda m: None, only=None):
+    """`only`: a list of job ids. Plans just those jobs (any stage, rejected ones too), and writes no rollup
+    and no boost.md, because those describe the whole day."""
     root = Path(root)
     run_dir = root / "runs" / run_date
     config = load_json(root / "config.json", "config.json")
     boost_cfg = config.get("boost") or {}
-    top_n = top_n or boost_cfg.get("top_n") or DEFAULT_TOP_N
+    top_n = resolve_selection(boost_cfg, top_n) if only is None else None
     model = model or models_from_config(config)[1] or DEFAULT_MODEL
     filtered = load_json(run_dir / "filtered.json", "filtered.json")
     enriched = load_json(run_dir / "enriched.json", "enriched.json")
@@ -223,12 +248,19 @@ def run(root, run_date, top_n=None, model=None, prompt_version="v1", force=False
     check_models(client, [model])
 
     passed = bd.passed_jobs(enriched, filtered)
-    selection = bd.select_top(passed, model, top_n)
     notes = []
-    if not passed:
-        notes.append("No jobs passed the filter, so there is nothing to boost.")
-    elif len(selection) < top_n:
-        notes.append("Only %d job(s) could be planned (asked for %d)." % (len(selection), top_n))
+    if only is not None:
+        wanted = {str(i) for i in only}
+        pool = [j for j in enriched if str(j.get("id")) in wanted]
+        selection = bd.select_top(pool, model, len(pool))
+    else:
+        if top_n is None:  # boost.type "all"
+            top_n = len(passed)
+        selection = bd.select_top(passed, model, top_n)
+        if not passed:
+            notes.append("No jobs passed the filter, so there is nothing to boost.")
+        elif len(selection) < top_n:
+            notes.append("Only %d job(s) could be planned (asked for %d)." % (len(selection), top_n))
     for s in selection:
         if s["fallback"]:
             notes.append("%s, %s was ranked by %s because %s had no result." % (
@@ -257,25 +289,44 @@ def run(root, run_date, top_n=None, model=None, prompt_version="v1", force=False
             records.append(record)
 
         rollup_path = run_dir / "boost_rollup.json"
-        tally = bd.annotate_repos(bd.tally_gaps(passed), projects_md, resume_text)
-        tally_hash = hashlib.sha1(json.dumps(tally, sort_keys=True).encode("utf-8")).hexdigest()
-        rollup = reusable(rollup_path, prompt.VERSION, force)
-        if rollup and rollup.get("tally_hash") == tally_hash:
-            rollup_state = "skipped"
+        if only is not None:
+            rollup, rollup_state = None, "skipped"
         else:
-            log("rollup | %d jobs, %d missing skills" % (len(passed), len(tally)))
-            rollup, spec_text = build_rollup(ctx, passed, tally_hash, tally)
-            if spec_text:
-                write_text_atomic(run_dir / rollup["spec_file"], spec_text)
-            write_json(rollup_path, rollup)
-            rollup_state = "done" if rollup["ok"] else "failed"
+            tally = bd.annotate_repos(bd.tally_gaps(passed), projects_md, resume_text)
+            tally_hash = hashlib.sha1(json.dumps(tally, sort_keys=True).encode("utf-8")).hexdigest()
+            rollup = reusable(rollup_path, prompt.VERSION, force)
+            if rollup and rollup.get("tally_hash") == tally_hash:
+                rollup_state = "skipped"
+            else:
+                log("rollup | %d jobs, %d missing skills" % (len(passed), len(tally)))
+                rollup, spec_text = build_rollup(ctx, passed, tally_hash, tally)
+                if spec_text:
+                    write_text_atomic(run_dir / rollup["spec_file"], spec_text)
+                write_json(rollup_path, rollup)
+                rollup_state = "done" if rollup["ok"] else "failed"
     finally:
         if unload:
             unload_model(client, model)
             log("unloaded %s" % model)
 
-    write_text_atomic(run_dir / "boost.md", boost_report.render_report(run_date, rollup, records, notes))
+    if only is None:
+        write_text_atomic(run_dir / "boost.md", boost_report.render_report(run_date, rollup, records, notes))
     return {"date": run_date, "prompt_version": prompt.VERSION, "model": model, **counts, "rollup": rollup_state}
+
+
+def run_for_job(root, run_date, job_id, **kwargs):
+    """Plan one job (the page's "Give me boost") and merge the plan into jobs.json."""
+    from merge import MergeError, merge_run
+    summary = run(root, run_date, only=[str(job_id)], **kwargs)
+    if summary["selected"] == 0:
+        raise LLMError("job %s has no usable score in runs/%s, so it cannot be boosted" % (job_id, run_date))
+    if summary["failed"]:
+        raise LLMError("the boost plan for job %s failed (see runs/%s/boost/%s.json)" % (job_id, run_date, job_id))
+    try:
+        merge_run(root, run_date)
+    except MergeError as e:
+        raise LLMError("merging the plan failed: %s" % e)
+    return summary
 
 
 def main(argv):
@@ -289,11 +340,26 @@ def main(argv):
     p.add_argument("--retries", type=int, default=1)
     p.add_argument("--think", action="store_true")
     p.add_argument("--keep-loaded", action="store_true")
+    p.add_argument("--job", help="plan only this job id (any stage), then merge it into jobs.json; exits 3 while a worker is running")
     args = p.parse_args(argv)
     try:
         datetime.strptime(args.date, "%Y-%m-%d")
     except ValueError:
         p.error("date must be YYYY-MM-DD")
+    if args.job:
+        from jobslock import AlreadyRunning, worker_lock
+        try:
+            with worker_lock(ROOT):
+                summary = run_for_job(ROOT, args.date, args.job, model=args.model, prompt_version=args.prompt_version,
+                                      force=args.force, num_ctx=args.num_ctx, retries=args.retries, think=args.think,
+                                      unload=not args.keep_loaded, log=lambda m: print(m, file=sys.stderr, flush=True))
+        except AlreadyRunning:
+            print("boost.py: a worker is running; try again when it has finished", file=sys.stderr)
+            sys.exit(3)
+        except LLMError as e:
+            sys.exit("boost.py: %s" % e)
+        print(json.dumps(summary))
+        return
     try:
         summary = run(ROOT, args.date, top_n=args.top_n, model=args.model, prompt_version=args.prompt_version,
                       force=args.force, num_ctx=args.num_ctx, retries=args.retries, think=args.think,

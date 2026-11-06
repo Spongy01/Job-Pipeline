@@ -9,8 +9,10 @@ A small local server for the jobs page. Standard library only, bound to 127.0.0.
                                   the left nav cards, graph series, counts (scripts/jobs_query.py)
   GET  /api/job/<id>              the full job record
   GET  /api/rollup/<date>         that day's boost rollup (rollups.json)
-  POST /api/job/<id>/status       {"status": "applied" | "skipped" | null}: the only write; it
-                                  changes user_status of that one job in jobs.json
+  POST /api/job/<id>/status       {"status": "applied" | "skipped" | null}: changes user_status of that one
+                                  job in jobs.json
+  POST /api/job/<id>/boost        "Give me boost": saves a request in queue/boost_requests/ (never touches
+                                  jobs.json); the BoostRunner thread plans that job when no worker is running
 
 Every request must carry a Host header of localhost or 127.0.0.1. A corrupt jobs.json stops the
 server from starting and makes requests fail with a 500 and a message, never an empty page.
@@ -29,6 +31,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import jobs_query as jq  # noqa: E402
+import boost_requests  # noqa: E402
 from jobslock import jobs_lock  # noqa: E402
 from clean import write_json_atomic  # noqa: E402
 from jobs_query import JobsError  # noqa: E402
@@ -163,6 +166,9 @@ def make_handler(store, web_dir, quiet, today=None):
                 job = store.get(unquote(m.group(1)))
                 if job is None:
                     raise HttpError(404, "no such job")
+                request = boost_requests.read(store.root, str(job["id"]))
+                if request:
+                    job = {**job, "boost_request": {k: request[k] for k in ("state", "error") if k in request}}
                 return self.send_json(200, job)
             m = re.fullmatch(r"/api/rollup/([^/]+)", path)
             if m:
@@ -175,6 +181,9 @@ def make_handler(store, web_dir, quiet, today=None):
             raise HttpError(404, "not found")
 
         def route_post(self, path):
+            m = re.fullmatch(r"/api/job/([^/]+)/boost", path)
+            if m:
+                return self.route_boost(unquote(m.group(1)))
             m = re.fullmatch(r"/api/job/([^/]+)/status", path)
             if not m:
                 raise HttpError(404, "not found")
@@ -200,6 +209,29 @@ def make_handler(store, web_dir, quiet, today=None):
             except KeyError:
                 raise HttpError(404, "no such job")
             self.send_json(200, {"id": job_id, "user_status": status})
+
+        def route_boost(self, job_id):
+            if not (self.headers.get("Content-Type") or "").lower().startswith("application/json"):
+                raise HttpError(415, "send application/json")
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                raise HttpError(400, "bad Content-Length")
+            if length > MAX_BODY:
+                raise HttpError(413, "request body too large")
+            self.rfile.read(length)  # the body carries nothing; read it so the connection stays clean
+            job = store.get(job_id)
+            if job is None:
+                raise HttpError(404, "no such job")
+            if isinstance(job.get("boost"), dict) and job["boost"].get("ok"):
+                return self.send_json(200, {"id": job_id, "state": "done"})
+            run_date = job.get("run_date")
+            try:
+                self.check_date(run_date or "")
+                request = boost_requests.submit(store.root, str(job["id"]), run_date)
+            except boost_requests.RequestError as e:
+                raise HttpError(400, str(e))
+            self.send_json(202, {"id": job_id, "state": request["state"]})
 
         def check_date(self, value):
             try:
@@ -268,11 +300,14 @@ def main(argv):
         sys.exit("serve.py: cannot listen on port %d (%s). If the page is already running it is at "
                  "http://localhost:%d/ ; otherwise pick another port with --port." % (args.port, e.strerror or e, args.port))
     print(json.dumps({"url": "http://localhost:%d/" % server.server_address[1]}), flush=True)
+    stop_runner = threading.Event()
+    threading.Thread(target=boost_requests.BoostRunner(ROOT).loop, args=(stop_runner,), daemon=True).start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
+        stop_runner.set()
         server.server_close()
 
 
