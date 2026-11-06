@@ -519,6 +519,29 @@
     return wrap;
   }
 
+  // ---------- run progress (top bar) ----------
+  var PHASE_TEXT = { receiving: "scraper sending jobs", finishing: "stopped, finishing the queue", final_steps: "final steps (boost, rollup)",
+                     no_worker: "worker not running" };
+  function renderProgress(p) {
+    var box = $("progress");
+    clear(box);
+    if (!p || !p.active) { box.hidden = true; return; }
+    box.hidden = false;
+    var inFlight = p.waiting + p.processing;
+    var pct = p.scraped ? Math.min(100, Math.round(100 * p.processed / p.scraped)) : 0;
+    box.appendChild(h("div", { class: "numbers" },
+      h("span", null, h("b", { text: "Scraped " }), String(p.scraped)),
+      h("span", null, h("b", { text: "Processed " }), String(p.processed)),
+      h("span", null, h("b", { text: "Waiting " }), String(p.waiting) + (p.processing ? " (+" + p.processing + " running)" : "")),
+      p.failed ? h("span", { class: "bad" }, h("b", { text: "Failed " }), String(p.failed)) : null));
+    var bar = h("div", { class: "bar" }, h("div", { class: "fill", style: "width:" + pct + "%" }));
+    box.appendChild(bar);
+    box.appendChild(h("div", { class: "phase" + (p.phase === "no_worker" && inFlight ? " bad" : ""), text: p.date + " · " + (PHASE_TEXT[p.phase] || p.phase) }));
+  }
+  function refreshProgress() {
+    return api("/api/progress").then(renderProgress).catch(function () { /* keep what is shown; try again next tick */ });
+  }
+
   // ---------- live updates ----------
   // Every few seconds, while the tab is visible, fetch the list again. A failed poll changes nothing on
   // screen. The selected job, the scroll positions and the open description are left alone unless that
@@ -528,7 +551,9 @@
     return card ? JSON.stringify(card) : null;
   }
   function poll() {
-    if (document.visibilityState !== "visible" || polling || !view) return;
+    if (document.visibilityState !== "visible") return;
+    refreshProgress();
+    if (polling || !view) return;
     polling = true;
     var before = view, beforeSignature = cardSignature(selected), known = {};
     before.cards.forEach(function (c) { known[c.id] = true; });
@@ -554,4 +579,5 @@
   wireControls();
   syncControls();
   refresh();
+  refreshProgress();
 })();
